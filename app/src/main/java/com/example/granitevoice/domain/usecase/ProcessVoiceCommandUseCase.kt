@@ -28,13 +28,22 @@ class ProcessVoiceCommandUseCase @Inject constructor(
     }
 
     suspend operator fun invoke(transcription: String): VoiceCommandResult {
+        val startTime = System.currentTimeMillis()
         val processingSteps = mutableListOf<ProcessingStep>()
 
         return try {
-            Log.d(TAG, "Processing voice command: '$transcription'")
+            Log.d(TAG, "=== Starting voice command processing ===")
+            Log.d(TAG, "Transcription: '$transcription'")
+            Log.d(
+                TAG,
+                "Config: maxAlternatives=${config.maxAlternatives}, minConfidence=${config.minimumConfidence}"
+            )
 
             // Step 1: Recognize Intent
+            val intentStartTime = System.currentTimeMillis()
             val intent = recognizeIntentUseCase(transcription)
+            val intentDuration = System.currentTimeMillis() - intentStartTime
+
             processingSteps.add(
                 ProcessingStep(
                     step = "Intent Recognition",
@@ -43,14 +52,39 @@ class ProcessVoiceCommandUseCase @Inject constructor(
                 )
             )
 
-            when (intent) {
-                is CommandIntent.StockLookup -> processStockLookup(transcription, processingSteps)
-                is CommandIntent.Unknown -> handleUnknownCommand(transcription, processingSteps)
-                else -> handleUnknownCommand(transcription, processingSteps)
+            Log.d(TAG, "Intent recognition completed in ${intentDuration}ms: $intent")
+
+            val result = when (intent) {
+                is CommandIntent.StockLookup -> {
+                    Log.d(TAG, "Processing stock lookup command")
+                    processStockLookup(transcription, processingSteps)
+                }
+
+                is CommandIntent.Unknown -> {
+                    Log.d(TAG, "Processing unknown command")
+                    handleUnknownCommand(transcription, processingSteps)
+                }
+
+                else -> {
+                    Log.d(TAG, "Processing unsupported command")
+                    handleUnknownCommand(transcription, processingSteps)
+                }
             }
 
+            val totalDuration = System.currentTimeMillis() - startTime
+            Log.d(TAG, "=== Voice command processing completed in ${totalDuration}ms ===")
+            Log.d(TAG, "Result summary: ${result.getResultSummary()}")
+
+            if (config.enableProcessingLogging) {
+                logProcessingSteps(result.processingSteps)
+            }
+
+            result
+
         } catch (e: Exception) {
-            Log.e(TAG, "Voice command processing failed", e)
+            val totalDuration = System.currentTimeMillis() - startTime
+            Log.e(TAG, "Voice command processing failed after ${totalDuration}ms", e)
+
             VoiceCommandResult(
                 originalTranscription = transcription,
                 intent = CommandIntent.Unknown,
@@ -69,10 +103,13 @@ class ProcessVoiceCommandUseCase @Inject constructor(
         transcription: String,
         processingSteps: MutableList<ProcessingStep>
     ): VoiceCommandResult {
+        Log.d(TAG, "--- Starting stock lookup workflow ---")
 
         // Step 2: Extract Query
+        val queryStartTime = System.currentTimeMillis()
         val extractedQuery = voiceProcessingRepository.extractItemQuery(transcription)
             .getOrDefault(transcription)
+        val queryDuration = System.currentTimeMillis() - queryStartTime
 
         processingSteps.add(
             ProcessingStep(
@@ -82,8 +119,16 @@ class ProcessVoiceCommandUseCase @Inject constructor(
             )
         )
 
+        Log.d(
+            TAG,
+            "Query extraction completed in ${queryDuration}ms: '$transcription' -> '$extractedQuery'"
+        )
+
         // Step 3: Search for Items
+        val searchStartTime = System.currentTimeMillis()
         val searchResults = searchItemsUseCase(extractedQuery)
+        val searchDuration = System.currentTimeMillis() - searchStartTime
+
         processingSteps.add(
             ProcessingStep(
                 step = "Item Search",
@@ -92,7 +137,20 @@ class ProcessVoiceCommandUseCase @Inject constructor(
             )
         )
 
+        Log.d(
+            TAG,
+            "Item search completed in ${searchDuration}ms: found ${searchResults.size} matches"
+        )
+
+        if (searchResults.isNotEmpty()) {
+            Log.d(TAG, "Search results:")
+            searchResults.forEachIndexed { index, item ->
+                Log.d(TAG, "  [$index] ${item.code}: ${item.description}")
+            }
+        }
+
         if (searchResults.isEmpty()) {
+            Log.d(TAG, "No items found for query '$extractedQuery'")
             return VoiceCommandResult(
                 originalTranscription = transcription,
                 intent = CommandIntent.StockLookup,
@@ -111,12 +169,30 @@ class ProcessVoiceCommandUseCase @Inject constructor(
         val alternatives = searchResults.drop(1).take(config.maxAlternatives - 1)
         val confidence = calculateConfidence(extractedQuery, primaryMatch)
 
+        Log.d(TAG, "Primary match: ${primaryMatch.code} (confidence: $confidence)")
+        Log.d(TAG, "Alternative matches: ${alternatives.size}")
+        alternatives.forEach { alt ->
+            Log.d(TAG, "  - ${alt.code}: ${alt.description}")
+        }
+
         // Step 5: Load Stock Information (Primary Only for Performance)
         val stockSummaries = mutableMapOf<String, ItemStockSummary>()
         val stockLookupErrors = mutableMapOf<String, String>()
 
         if (confidence >= config.minimumConfidence && config.enableStockLookup) {
+            Log.d(
+                TAG,
+                "Loading stock info for primary match (confidence $confidence >= ${config.minimumConfidence})"
+            )
+            val stockStartTime = System.currentTimeMillis()
             loadStockInfo(primaryMatch, stockSummaries, stockLookupErrors)
+            val stockDuration = System.currentTimeMillis() - stockStartTime
+            Log.d(TAG, "Stock lookup completed in ${stockDuration}ms")
+        } else {
+            Log.d(
+                TAG,
+                "Skipping stock lookup: confidence=$confidence, minRequired=${config.minimumConfidence}, enabled=${config.enableStockLookup}"
+            )
         }
 
         processingSteps.add(
@@ -127,7 +203,7 @@ class ProcessVoiceCommandUseCase @Inject constructor(
             )
         )
 
-        return VoiceCommandResult(
+        val result = VoiceCommandResult(
             originalTranscription = transcription,
             intent = CommandIntent.StockLookup,
             extractedQuery = extractedQuery,
@@ -141,12 +217,17 @@ class ProcessVoiceCommandUseCase @Inject constructor(
             stockSummary = stockSummaries[primaryMatch.code],
             stockLookupError = stockLookupErrors[primaryMatch.code]
         )
+
+        Log.d(TAG, "--- Stock lookup workflow completed ---")
+        return result
     }
 
     private suspend fun handleUnknownCommand(
         transcription: String,
         processingSteps: MutableList<ProcessingStep>
     ): VoiceCommandResult {
+        Log.d(TAG, "Handling unknown command: '$transcription'")
+
         processingSteps.add(
             ProcessingStep(
                 step = "Command Processing",
@@ -173,6 +254,8 @@ class ProcessVoiceCommandUseCase @Inject constructor(
         stockSummaries: MutableMap<String, ItemStockSummary>,
         stockLookupErrors: MutableMap<String, String>
     ) {
+        Log.d(TAG, "Loading stock info for item: ${item.code}")
+
         try {
             withTimeoutOrNull(config.stockLookupTimeoutMs) {
                 stockRepository.getItemStockSummary(item)
@@ -181,7 +264,7 @@ class ProcessVoiceCommandUseCase @Inject constructor(
                     stockSummaries[item.code] = summary
                     Log.d(
                         TAG,
-                        "Stock lookup successful for ${item.code}: ${summary.getTotalQuantityDisplay()}"
+                        "Stock lookup successful for ${item.code}: ${summary.getTotalQuantityDisplay()} in ${summary.locationCount} locations"
                     )
                 },
                 onFailure = { exception ->
@@ -212,6 +295,16 @@ class ProcessVoiceCommandUseCase @Inject constructor(
             descriptionLower.contains(queryLower) || queryLower.contains(descriptionLower) -> 0.75f
             else -> 0.6f // AI found it, give it reasonable credit
         }
+    }
+
+    private fun logProcessingSteps(steps: List<ProcessingStep>) {
+        Log.d(TAG, "=== Processing Steps Summary ===")
+        steps.forEachIndexed { index, step ->
+            Log.d(TAG, "Step ${index + 1}: ${step.step}")
+            Log.d(TAG, "  Input: ${step.input}")
+            Log.d(TAG, "  Output: ${step.output}")
+        }
+        Log.d(TAG, "=== End Processing Steps ===")
     }
 
     /**

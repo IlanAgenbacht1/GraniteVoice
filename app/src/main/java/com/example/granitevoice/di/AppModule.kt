@@ -2,6 +2,7 @@ package com.example.granitevoice.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.work.WorkManager
 import com.example.granitevoice.data.local.dao.MasterItemDao
 import com.example.granitevoice.data.local.db.AppDatabase
 import com.example.granitevoice.data.local.preferences.GranitePreferences
@@ -16,7 +17,8 @@ import com.example.granitevoice.domain.model.VoiceProcessingConfig
 import com.example.granitevoice.domain.repository.MasterItemRepository
 import com.example.granitevoice.domain.repository.StockRepository
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
-import com.example.granitevoice.domain.usecase.ProcessVoiceCommandUseCase
+import com.example.granitevoice.domain.repository.AudioTranscriptionRepository
+import com.example.granitevoice.domain.repository.SyncRepository
 import com.google.gson.Gson
 import dagger.Module
 import dagger.Provides
@@ -73,6 +75,24 @@ object AppModule {
         return VoiceProcessingRepositoryImpl(openAIClient)
     }
 
+    // TODO: Implement these repository implementations
+    // @Provides
+    // @Singleton
+    // fun provideAudioTranscriptionRepository(
+    //     openAIClient: OpenAIClient
+    // ): AudioTranscriptionRepository {
+    //     return OpenAIAudioTranscriptionRepositoryImpl(openAIClient)
+    // }
+
+    // @Provides
+    // @Singleton
+    // fun provideSyncRepository(
+    //     workManager: WorkManager,
+    //     masterItemRepository: MasterItemRepository
+    // ): SyncRepository {
+    //     return WorkManagerSyncRepositoryImpl(workManager, masterItemRepository)
+    // }
+
     // Data Sources (Data Layer)
     @Provides
     @Singleton
@@ -103,6 +123,12 @@ object AppModule {
     @Singleton
     fun provideOpenAIClient(@ApplicationContext context: Context): OpenAIClient {
         return OpenAIClient(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
+        return WorkManager.getInstance(context)
     }
 
     // Configuration & Preferences

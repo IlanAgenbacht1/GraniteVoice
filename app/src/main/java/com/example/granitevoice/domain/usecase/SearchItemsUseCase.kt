@@ -16,78 +16,175 @@ class SearchItemsUseCase @Inject constructor(
     }
 
     suspend operator fun invoke(query: String): List<MasterItem> {
-        Log.d(TAG, "Searching for items with query: '$query'")
+        val startTime = System.currentTimeMillis()
+        Log.d(TAG, "=== Starting item search ===")
+        Log.d(TAG, "Search query: '$query'")
 
         // Step 1: Try simple database search first
+        val simpleStartTime = System.currentTimeMillis()
         val simpleMatches = performSimpleSearch(query)
+        val simpleDuration = System.currentTimeMillis() - simpleStartTime
+
         if (simpleMatches.isNotEmpty()) {
-            Log.d(TAG, "Found ${simpleMatches.size} simple matches")
+            val totalDuration = System.currentTimeMillis() - startTime
+            Log.d(
+                TAG,
+                "✅ Simple search completed in ${simpleDuration}ms (total: ${totalDuration}ms)"
+            )
+            Log.d(TAG, "Found ${simpleMatches.size} simple matches:")
+            simpleMatches.forEachIndexed { index, item ->
+                Log.d(TAG, "  [$index] ${item.code}: ${item.description}")
+            }
+            Log.d(TAG, "=== Item search completed ===")
             return simpleMatches
         }
 
+        Log.d(TAG, "Simple search completed in ${simpleDuration}ms - no matches found")
+        Log.d(TAG, "Proceeding with AI fuzzy matching...")
+
         // Step 2: AI fuzzy matching with filtered candidates
-        Log.d(TAG, "No simple matches, using AI fuzzy matching")
+        val aiStartTime = System.currentTimeMillis()
 
         val allItems = masterItemRepository.getMasterItems()
+        Log.d(TAG, "Retrieved ${allItems.size} total items from database")
+
         val candidates = getSmartCandidates(query, allItems)
+        val candidatesDuration = System.currentTimeMillis() - aiStartTime
+        Log.d(TAG, "Smart candidate selection completed in ${candidatesDuration}ms")
 
-        Log.d(TAG, "Using ${candidates.size} candidates from ${allItems.size} total items")
-
-        return voiceProcessingRepository.findSimilarItems(query, candidates)
-            .getOrElse {
-                Log.e(TAG, "AI matching failed")
+        val aiMatches = voiceProcessingRepository.findSimilarItems(query, candidates)
+            .getOrElse { exception ->
+                Log.e(TAG, "AI matching failed: ${exception.message}")
                 emptyList()
             }
+
+        val aiDuration = System.currentTimeMillis() - aiStartTime
+        val totalDuration = System.currentTimeMillis() - startTime
+
+        if (aiMatches.isNotEmpty()) {
+            Log.d(
+                TAG,
+                "✅ AI fuzzy matching completed in ${aiDuration}ms (total: ${totalDuration}ms)"
+            )
+            Log.d(TAG, "Found ${aiMatches.size} AI matches:")
+            aiMatches.forEachIndexed { index, item ->
+                Log.d(TAG, "  [$index] ${item.code}: ${item.description}")
+            }
+        } else {
+            Log.d(
+                TAG,
+                "❌ AI fuzzy matching completed in ${aiDuration}ms - no matches found (total: ${totalDuration}ms)"
+            )
+        }
+
+        Log.d(TAG, "=== Item search completed ===")
+        return aiMatches
     }
 
     private suspend fun performSimpleSearch(query: String): List<MasterItem> {
         val queryLower = query.lowercase().trim()
+        Log.d(TAG, "--- Starting simple database search ---")
+        Log.d(TAG, "Normalized query: '$queryLower'")
 
         // Try exact code match first
+        val exactStartTime = System.currentTimeMillis()
         val exactCodeMatches = masterItemRepository.searchItems(queryLower, limit = 5)
             .filter { it.code.lowercase() == queryLower }
+        val exactDuration = System.currentTimeMillis() - exactStartTime
 
         if (exactCodeMatches.isNotEmpty()) {
-            Log.d(TAG, "Found exact code matches: ${exactCodeMatches.size}")
+            Log.d(TAG, "✅ Found ${exactCodeMatches.size} exact code matches in ${exactDuration}ms:")
+            exactCodeMatches.forEach { item ->
+                Log.d(TAG, "  - ${item.code}: ${item.description}")
+            }
             return exactCodeMatches
         }
+        Log.d(TAG, "No exact code matches found (${exactDuration}ms)")
 
         // Try substring matches in code
+        val codeStartTime = System.currentTimeMillis()
         val codeSubstringMatches = masterItemRepository.searchItems(queryLower, limit = 5)
             .filter { it.code.lowercase().contains(queryLower) }
+        val codeDuration = System.currentTimeMillis() - codeStartTime
 
         if (codeSubstringMatches.isNotEmpty()) {
-            Log.d(TAG, "Found code substring matches: ${codeSubstringMatches.size}")
+            Log.d(
+                TAG,
+                "✅ Found ${codeSubstringMatches.size} code substring matches in ${codeDuration}ms:"
+            )
+            codeSubstringMatches.forEach { item ->
+                Log.d(TAG, "  - ${item.code}: ${item.description}")
+            }
             return codeSubstringMatches
         }
+        Log.d(TAG, "No code substring matches found (${codeDuration}ms)")
 
         // Try substring matches in description
+        val descStartTime = System.currentTimeMillis()
         val descriptionMatches = masterItemRepository.searchItems(queryLower, limit = 5)
             .filter { it.description.lowercase().contains(queryLower) }
+        val descDuration = System.currentTimeMillis() - descStartTime
 
         if (descriptionMatches.isNotEmpty()) {
-            Log.d(TAG, "Found description substring matches: ${descriptionMatches.size}")
+            Log.d(
+                TAG,
+                "✅ Found ${descriptionMatches.size} description substring matches in ${descDuration}ms:"
+            )
+            descriptionMatches.take(3).forEach { item ->
+                Log.d(TAG, "  - ${item.code}: ${item.description}")
+            }
+            Log.d(TAG, "--- Simple database search completed ---")
             return descriptionMatches.take(3)
         }
+        Log.d(TAG, "No description substring matches found (${descDuration}ms)")
+        Log.d(TAG, "--- Simple database search completed - no matches ---")
 
         return emptyList()
     }
 
     private fun getSmartCandidates(query: String, allItems: List<MasterItem>): List<MasterItem> {
+        Log.d(TAG, "--- Starting smart candidate selection ---")
+
         return if (allItems.size > 100) {
             // Filter by first letter for large datasets
             val firstLetter = query.trim().lowercase().firstOrNull()
             if (firstLetter != null) {
-                allItems.filter { item ->
+                val candidateStartTime = System.currentTimeMillis()
+                val candidates = allItems.filter { item ->
                     item.code.lowercase().startsWith(firstLetter.toString()) ||
                             item.description.lowercase().startsWith(firstLetter.toString())
-                }.also {
-                    Log.d(TAG, "Filtered by first letter '$firstLetter': ${it.size} items")
                 }
+                val candidateDuration = System.currentTimeMillis() - candidateStartTime
+
+                Log.d(
+                    TAG,
+                    "First letter filtering ('$firstLetter') completed in ${candidateDuration}ms"
+                )
+                Log.d(TAG, "Filtered from ${allItems.size} to ${candidates.size} candidates")
+
+                if (candidates.isNotEmpty()) {
+                    Log.d(TAG, "Sample candidates:")
+                    candidates.take(5).forEach { item ->
+                        Log.d(TAG, "  - ${item.code}: ${item.description}")
+                    }
+                    if (candidates.size > 5) {
+                        Log.d(TAG, "  ... and ${candidates.size - 5} more")
+                    }
+                }
+
+                candidates
             } else {
-                allItems.shuffled().take(50)
+                Log.d(TAG, "No first letter found, using random sample of 50 items")
+                val randomSample = allItems.shuffled().take(50)
+                Log.d(TAG, "Random sample selected:")
+                randomSample.take(3).forEach { item ->
+                    Log.d(TAG, "  - ${item.code}: ${item.description}")
+                }
+                Log.d(TAG, "  ... and ${randomSample.size - 3} more")
+                randomSample
             }
         } else {
+            Log.d(TAG, "Dataset small enough (${allItems.size} ≤ 100), using all items")
             allItems
         }
     }
