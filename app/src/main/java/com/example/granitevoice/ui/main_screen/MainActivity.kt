@@ -63,11 +63,41 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.granitevoice.R
+import com.example.granitevoice.data.local.preferences.GranitePreferences
+import com.example.granitevoice.ui.components.VoiceResultCard
+import com.example.granitevoice.ui.configuration.ConfigurationScreen
+import com.example.granitevoice.ui.configuration.ConfigurationViewModel
 import com.example.granitevoice.ui.theme.GraniteVoiceTheme
 import com.example.granitevoice.ui.tutorial.TutorialScreen
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlin.math.pow
 import kotlin.math.sqrt
+
+private fun calculateMaxRadius(
+    screenWidth: Float,
+    screenHeight: Float,
+    fabX: Float,
+    fabY: Float
+): Float {
+    val distanceToTopLeft = sqrt(fabX * fabX + fabY * fabY)
+    val distanceToTopRight = sqrt((screenWidth - fabX).pow(2) + fabY.pow(2))
+    val distanceToBottomLeft = sqrt(fabX.pow(2) + (screenHeight - fabY).pow(2))
+    val distanceToBottomRight = sqrt((screenWidth - fabX).pow(2) + (screenHeight - fabY).pow(2))
+
+    return maxOf(
+        distanceToTopLeft,
+        distanceToTopRight,
+        distanceToBottomLeft,
+        distanceToBottomRight
+    ) * 1.2f
+}
+
+private fun Float.pow(i: Int): Float = this * this
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -75,13 +105,18 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val syncViewModel: SyncViewModel by viewModels()
 
-
+    @Inject
+    lateinit var granitePreferences: GranitePreferences
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             GraniteVoiceTheme {
-                MainScreen(viewModel = viewModel, syncViewModel = syncViewModel)
+                MainAppContent(
+                    mainViewModel = viewModel,
+                    syncViewModel = syncViewModel,
+                    granitePreferences = granitePreferences
+                )
             }
         }
         checkAndRequestPermissions()
@@ -107,6 +142,53 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
+ * Main app content that handles navigation between configuration and main screens
+ */
+@Composable
+fun MainAppContent(
+    mainViewModel: MainViewModel,
+    syncViewModel: SyncViewModel,
+    granitePreferences: GranitePreferences
+) {
+    val isConfigValid = granitePreferences.isValidConfiguration()
+    android.util.Log.d("MainActivity", "Configuration valid: $isConfigValid")
+    android.util.Log.d(
+        "MainActivity",
+        "Config summary: ${granitePreferences.getConfigurationSummary()}"
+    )
+
+    // Start with config screen if not configured, otherwise start with main screen
+    var showConfiguration by remember { mutableStateOf(!isConfigValid) }
+
+    android.util.Log.d("MainActivity", "showConfiguration state: $showConfiguration")
+
+    if (showConfiguration) {
+        val configViewModel: ConfigurationViewModel = hiltViewModel()
+
+        ConfigurationScreen(
+            onConfigurationComplete = {
+                android.util.Log.d("MainActivity", "Configuration completed, hiding config screen")
+                showConfiguration = false
+            },
+            onSkipConfiguration = {
+                android.util.Log.d("MainActivity", "Configuration skipped, hiding config screen")
+                showConfiguration = false
+            },
+            viewModel = configViewModel
+        )
+    } else {
+        MainScreen(
+            viewModel = mainViewModel,
+            syncViewModel = syncViewModel,
+            onShowConfiguration = {
+                android.util.Log.d("MainActivity", "Settings button clicked, showing config screen")
+                showConfiguration = true
+            }
+        )
+    }
+}
+
+/**
  * The main screen of the application, which observes state from the [MainViewModel]
  * and handles side effects like status bar color changes and snackbar messages.
  * This composable is the stateful container for the UI.
@@ -114,7 +196,11 @@ class MainActivity : ComponentActivity() {
  * @param viewModel The view model that provides the UI state and handles business logic.
  */
 @Composable
-fun MainScreen(viewModel: MainViewModel, syncViewModel: SyncViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    syncViewModel: SyncViewModel,
+    onShowConfiguration: () -> Unit
+) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarMessage by viewModel.snackbarMessage.collectAsState()
     val localSnackbarHostState = remember { SnackbarHostState() }
@@ -155,7 +241,8 @@ fun MainScreen(viewModel: MainViewModel, syncViewModel: SyncViewModel) {
         onStopRecording = viewModel::stopRecording,
         onCancelRecording = viewModel::cancelRecording,
         snackbarHostState = localSnackbarHostState,
-        onSync = syncViewModel::startSync
+        mainViewModel = viewModel,
+        onShowConfiguration = onShowConfiguration
     )
 }
 
@@ -175,13 +262,15 @@ fun MainScreenContent(
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onCancelRecording: () -> Unit,
-    onSync: () -> Unit,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    mainViewModel: MainViewModel,
+    onShowConfiguration: () -> Unit
 ) {
     val grey = Color(0xFF272727)
     val blue = Color(0xFF00a5cc)
     val theme = Color(0xFF2D2D2E)
     var helpVisible by remember { mutableStateOf(false) }
+    val commandResult by mainViewModel.commandResult.collectAsState()
 
     var fabX by remember { mutableFloatStateOf(0f) }
     var fabY by remember { mutableFloatStateOf(0f) }
@@ -244,14 +333,16 @@ fun MainScreenContent(
             }
         }
 
-        Button(
-            onClick = onSync,
+        VoiceResultCard(
+            result = commandResult,
+            isVisible = commandResult != null,
+            onDismiss = mainViewModel::clearResult,
+            onSelectAlternative = mainViewModel::retryWithAlternative,
             modifier = Modifier
+                .padding(horizontal = 16.dp)
                 .align(Alignment.TopCenter)
-                .padding(top = 16.dp)
-        ) {
-            Text("Sync Master Items")
-        }
+                .padding(top = 80.dp)
+        )
 
         AnimatedVisibility(
             visible = uiState == MainViewModel.UiState.Processing,
@@ -267,7 +358,9 @@ fun MainScreenContent(
         }
 
         AnimatedVisibility(
-            visible = uiState == MainViewModel.UiState.Listening, enter = fadeIn(), exit = fadeOut(),
+            visible = uiState == MainViewModel.UiState.Listening,
+            enter = fadeIn(),
+            exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
         ) {
             Text("Listening", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -326,23 +419,49 @@ fun MainScreenContent(
                     Spacer(modifier = Modifier.weight(1f))
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
+                if (uiState is MainViewModel.UiState.Idle) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .wrapContentSize(Alignment.BottomEnd)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .shadow(elevation = 8.dp, shape = CircleShape)
+                                .clip(CircleShape)
+                                .background(theme, CircleShape)
+                                .clickable { onShowConfiguration() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
             }
-        }
 
-        AnimatedVisibility(
-            visible = helpVisible,
-            enter = fadeIn(animationSpec = tween(200)),
-            exit = fadeOut(animationSpec = tween(200))
-        ) {
-            TutorialScreen(onDismiss = { helpVisible = false })
+            AnimatedVisibility(
+                visible = helpVisible,
+                enter = fadeIn(animationSpec = tween(200)),
+                exit = fadeOut(animationSpec = tween(200))
+            ) {
+                TutorialScreen(onDismiss = { helpVisible = false })
+            }
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 100.dp)
+            )
         }
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 10.dp)
-        )
     }
 }
 
@@ -454,24 +573,3 @@ fun VoiceNoteButton(
         }
     }
 }
-
-private fun calculateMaxRadius(
-    screenWidth: Float,
-    screenHeight: Float,
-    fabX: Float,
-    fabY: Float
-): Float {
-    val distanceToTopLeft = sqrt(fabX * fabX + fabY * fabY)
-    val distanceToTopRight = sqrt((screenWidth - fabX).pow(2) + fabY.pow(2))
-    val distanceToBottomLeft = sqrt(fabX.pow(2) + (screenHeight - fabY).pow(2))
-    val distanceToBottomRight = sqrt((screenWidth - fabX).pow(2) + (screenHeight - fabY).pow(2))
-
-    return maxOf(
-        distanceToTopLeft,
-        distanceToTopRight,
-        distanceToBottomLeft,
-        distanceToBottomRight
-    ) * 1.2f
-}
-
-private fun Float.pow(i: Int): Float = this * this

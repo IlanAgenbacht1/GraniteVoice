@@ -15,4 +15,19 @@ data class MasterItemDto(
 
     @SerializedName("Description")
     val description: String,
+
+    @SerializedName("UOM")
+    val unitOfMeasure: String? = null,
+
+    @SerializedName("PrimaryUOM")
+    val primaryUOM: String? = null,
+
+    @SerializedName("StockUOM")
+    val stockUOM: String? = null,
+
+    @SerializedName("Category")
+    val category: String? = null,
+
+    @SerializedName("ItemType")
+    val itemType: String? = null
 )

@@ -11,25 +11,47 @@ class MasterItemsGraniteSource @Inject constructor(
     private val graniteClient: GraniteClient,
     private val gson: Gson
 ) {
-    fun getMasterItems(): List<MasterItem> {
+    suspend fun getMasterItems(): Result<List<MasterItem>> {
         Log.d("MasterItemSync", "Fetching master items from remote...")
-        // Step 1: Get the raw JSON string.
-        val jsonResponse = graniteClient.getMasterItems()
-        Log.d("MasterItemSync", "Received raw JSON: $jsonResponse")
 
-        // Step 2: Gson automatically parses the string into our DTO classes.
-        // This is where the automatic mapping from JSON -> DTO happens.
-        val response = gson.fromJson(jsonResponse, QueryMasterItemsResponse::class.java)
-        Log.d("MasterItemSync", "Successfully parsed ${response.Results.size} items from JSON.")
+        return try {
+            val result = graniteClient.getMasterItems()
 
-        // Step 3: We manually map from the DTO to our internal domain model.
-        // This is where we pick only the fields we need.
-        return response.Results.map { dto ->
-            MasterItem(
-                // We let Room handle the 'id', so we only take what we need.
-                code = dto.code,
-                description = dto.description
+            result.fold(
+                onSuccess = { jsonResponse ->
+                    Log.d("MasterItemSync", "Received raw JSON: $jsonResponse")
+
+                    // Parse the JSON response
+                    val response = gson.fromJson(jsonResponse, QueryMasterItemsResponse::class.java)
+                    Log.d(
+                        "MasterItemSync",
+                        "Successfully parsed ${response.Results.size} items from JSON."
+                    )
+
+                    // Map from DTO to domain model with code as primary key
+                    val masterItems = response.Results.map { dto ->
+                        MasterItem(
+                            code = dto.code,
+                            description = dto.description,
+                            remoteId = dto.id, // Keep remote ID for reference
+                            unitOfMeasure = dto.unitOfMeasure ?: dto.primaryUOM
+                            ?: dto.stockUOM, // Use first available UOM
+                            category = dto.category,
+                            itemType = dto.itemType
+                        )
+                    }
+
+                    Log.d("MasterItemSync", "Mapped ${masterItems.size} items to domain models.")
+                    Result.success(masterItems)
+                },
+                onFailure = { exception ->
+                    Log.e("MasterItemSync", "Failed to fetch master items", exception)
+                    Result.failure(exception)
+                }
             )
+        } catch (e: Exception) {
+            Log.e("MasterItemSync", "Exception during master items fetch", e)
+            Result.failure(e)
         }
     }
 }
