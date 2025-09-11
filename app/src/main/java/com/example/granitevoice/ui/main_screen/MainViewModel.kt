@@ -73,31 +73,28 @@ class MainViewModel @Inject constructor(
     }
 
     private suspend fun processVoiceCommand(transcription: String) {
-        processVoiceCommandUseCase.execute(transcription).fold(
-            onSuccess = { result ->
-                _commandResult.value = result
+        try {
+            val result = processVoiceCommandUseCase(transcription)
+            _commandResult.value = result
 
-                when (result.intent) {
-                    is CommandIntent.StockLookup -> {
-                        handleStockLookupResult(result)
-                    }
-                    is CommandIntent.Unknown -> {
-                        _snackbarMessage.value =
-                            "I didn't understand that command. Try: 'Find stock for [item name]'"
-                        _uiState.update { UiState.Idle }
-                    }
-                    is CommandIntent.Other -> {
-                        _snackbarMessage.value =
-                            "Command not supported: ${result.intent.description}"
-                        _uiState.update { UiState.Idle }
-                    }
+            when (result.intent) {
+                is CommandIntent.StockLookup -> {
+                    handleStockLookupResult(result)
                 }
-            },
-            onFailure = { exception ->
-                _snackbarMessage.value = "Processing error: ${exception.message}"
-                _uiState.update { UiState.ShowingError(exception.message ?: "Unknown error") }
+                is CommandIntent.Unknown -> {
+                    _snackbarMessage.value =
+                        "I didn't understand that command. Try: 'Find stock for [item name]'"
+                    _uiState.update { UiState.Idle }
+                }
+                else -> {
+                    _snackbarMessage.value = "Command not supported"
+                    _uiState.update { UiState.Idle }
+                }
             }
-        )
+        } catch (exception: Exception) {
+            _snackbarMessage.value = "Processing error: ${exception.message}"
+            _uiState.update { UiState.ShowingError(exception.message ?: "Unknown error") }
+        }
     }
 
     private fun handleStockLookupResult(result: VoiceCommandResult) {

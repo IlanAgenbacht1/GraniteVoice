@@ -10,8 +10,12 @@ import com.example.granitevoice.data.remote.client.OpenAIClient
 import com.example.granitevoice.data.remote.MasterItemsGraniteSource
 import com.example.granitevoice.data.remote.StockDetailGraniteSource
 import com.example.granitevoice.data.repository.MasterItemRepositoryImpl
+import com.example.granitevoice.data.repository.StockRepositoryImpl
+import com.example.granitevoice.data.repository.VoiceProcessingRepositoryImpl
 import com.example.granitevoice.domain.model.VoiceProcessingConfig
 import com.example.granitevoice.domain.repository.MasterItemRepository
+import com.example.granitevoice.domain.repository.StockRepository
+import com.example.granitevoice.domain.repository.VoiceProcessingRepository
 import com.example.granitevoice.domain.usecase.ProcessVoiceCommandUseCase
 import com.google.gson.Gson
 import dagger.Module
@@ -43,6 +47,7 @@ object AppModule {
         return db.masterItemDao()
     }
 
+    // Repository Interfaces (Domain Layer)
     @Provides
     @Singleton
     fun provideMasterItemRepository(
@@ -52,6 +57,23 @@ object AppModule {
         return MasterItemRepositoryImpl(dao, graniteSource)
     }
 
+    @Provides
+    @Singleton
+    fun provideStockRepository(
+        stockDetailSource: StockDetailGraniteSource
+    ): StockRepository {
+        return StockRepositoryImpl(stockDetailSource)
+    }
+
+    @Provides
+    @Singleton
+    fun provideVoiceProcessingRepository(
+        openAIClient: OpenAIClient
+    ): VoiceProcessingRepository {
+        return VoiceProcessingRepositoryImpl(openAIClient)
+    }
+
+    // Data Sources (Data Layer)
     @Provides
     @Singleton
     fun provideMasterItemsGraniteSource(
@@ -70,6 +92,7 @@ object AppModule {
         return StockDetailGraniteSource(graniteClient, gson)
     }
 
+    // External Clients (Data Layer)
     @Provides
     @Singleton
     fun provideGraniteClient(granitePreferences: GranitePreferences): GraniteClient {
@@ -78,14 +101,15 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideGranitePreferences(@ApplicationContext context: Context): GranitePreferences {
-        return GranitePreferences(context)
-    }
-
-    @Provides
-    @Singleton
     fun provideOpenAIClient(@ApplicationContext context: Context): OpenAIClient {
         return OpenAIClient(context)
+    }
+
+    // Configuration & Preferences
+    @Provides
+    @Singleton
+    fun provideGranitePreferences(@ApplicationContext context: Context): GranitePreferences {
+        return GranitePreferences(context)
     }
 
     @Provides
@@ -99,22 +123,6 @@ object AppModule {
             maxProcessingSteps = 4,
             enableStockLookup = true,
             stockLookupTimeoutMs = 10000L
-        )
-    }
-
-    @Provides
-    @Singleton
-    fun provideProcessVoiceCommandUseCase(
-        masterItemRepository: MasterItemRepositoryImpl,
-        stockDetailGraniteSource: StockDetailGraniteSource,
-        openAIClient: OpenAIClient,
-        config: VoiceProcessingConfig
-    ): ProcessVoiceCommandUseCase {
-        return ProcessVoiceCommandUseCase(
-            masterItemRepository,
-            stockDetailGraniteSource,
-            openAIClient,
-            config
         )
     }
 
