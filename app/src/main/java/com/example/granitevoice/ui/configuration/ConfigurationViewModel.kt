@@ -38,7 +38,15 @@ class ConfigurationViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ConfigurationUiState())
     val uiState: StateFlow<ConfigurationUiState> = _uiState.asStateFlow()
 
+    private var isEditMode = false
+
     init {
+        // Determine if we're in edit mode based on existing configuration
+        isEditMode = preferences.isValidConfiguration()
+        android.util.Log.d(
+            "ConfigurationViewModel",
+            "Starting in ${if (isEditMode) "edit" else "setup"} mode"
+        )
         loadExistingConfiguration()
     }
 
@@ -49,13 +57,14 @@ class ConfigurationViewModel @Inject constructor(
             username = preferences.username,
             password = preferences.password,
             allowSelfSignedCerts = preferences.allowSelfSignedCertificates,
-            isConfigurationSuccessful = false // Ensure this starts as false when editing
+            isConfigurationSuccessful = false // Always start as false - never auto-complete
         )
 
-        _uiState.update { validateForm(loadedState) }
+        _uiState.value =
+            validateForm(loadedState) // Use .value instead of .update to ensure immediate reset
         android.util.Log.d(
             "ConfigurationViewModel",
-            "Configuration loaded: isConfigurationSuccessful = ${_uiState.value.isConfigurationSuccessful}"
+            "Configuration loaded: isEditMode = $isEditMode, isConfigurationSuccessful = ${_uiState.value.isConfigurationSuccessful}"
         )
     }
 
@@ -85,6 +94,15 @@ class ConfigurationViewModel @Inject constructor(
 
     fun clearMessage() {
         _uiState.update { it.copy(message = null) }
+    }
+
+    fun resetConfigurationState() {
+        android.util.Log.d("ConfigurationViewModel", "Resetting configuration success state")
+        _uiState.value = _uiState.value.copy(isConfigurationSuccessful = false, message = null)
+        android.util.Log.d(
+            "ConfigurationViewModel",
+            "Reset complete - isConfigurationSuccessful: ${_uiState.value.isConfigurationSuccessful}"
+        )
     }
 
     private fun validateForm(state: ConfigurationUiState): ConfigurationUiState {

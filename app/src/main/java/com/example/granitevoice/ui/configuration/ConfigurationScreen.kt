@@ -66,6 +66,7 @@ import com.example.granitevoice.ui.theme.GraniteBlue
 import com.example.granitevoice.ui.theme.GraniteBlueDark
 import com.example.granitevoice.ui.theme.GraniteBlueLight
 import com.example.granitevoice.ui.theme.GraniteSuccess
+import kotlinx.coroutines.delay
 
 @Composable
 fun ConfigurationScreen(
@@ -77,6 +78,18 @@ fun ConfigurationScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    // Track if we've initialized to prevent race conditions
+    var isInitialized by remember { mutableStateOf(false) }
+
+    // Reset configuration success state when screen is first shown
+    LaunchedEffect(Unit) {
+        android.util.Log.d("ConfigurationScreen", "Performing initial reset")
+        viewModel.resetConfigurationState()
+        kotlinx.coroutines.delay(50) // Small delay to ensure state propagation
+        isInitialized = true
+        android.util.Log.d("ConfigurationScreen", "Initialization complete")
+    }
+
     // Show snackbar for messages
     LaunchedEffect(uiState.message) {
         uiState.message?.let { message ->
@@ -85,13 +98,14 @@ fun ConfigurationScreen(
         }
     }
 
-    // Navigate when configuration is successful
-    LaunchedEffect(uiState.isConfigurationSuccessful) {
+    // Navigate when configuration is successful (only after initialization)
+    LaunchedEffect(uiState.isConfigurationSuccessful, isInitialized) {
         android.util.Log.d(
             "ConfigurationScreen",
-            "isConfigurationSuccessful changed to: ${uiState.isConfigurationSuccessful}"
+            "Navigation check - isConfigurationSuccessful: ${uiState.isConfigurationSuccessful}, isInitialized: $isInitialized"
         )
-        if (uiState.isConfigurationSuccessful) {
+
+        if (uiState.isConfigurationSuccessful && isInitialized) {
             android.util.Log.d("ConfigurationScreen", "Calling onConfigurationComplete")
             onConfigurationComplete()
         }

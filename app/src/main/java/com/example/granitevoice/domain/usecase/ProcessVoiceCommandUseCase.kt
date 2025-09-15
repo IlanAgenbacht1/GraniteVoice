@@ -283,17 +283,120 @@ class ProcessVoiceCommandUseCase @Inject constructor(
     }
 
     private fun calculateConfidence(query: String, item: MasterItem): Float {
-        val queryLower = query.lowercase()
+        val queryLower = query.lowercase().trim()
         val codeLower = item.code.lowercase()
         val descriptionLower = item.description.lowercase()
 
-        // Simple confidence calculation - can be enhanced
+        Log.d(
+            TAG,
+            "Calculating confidence for: '$queryLower' vs '${item.code}' / '${item.description}'"
+        )
+
+        // Enhanced confidence calculation that better reflects fuzzy matching quality
         return when {
-            codeLower == queryLower -> 1.0f
-            descriptionLower == queryLower -> 0.95f
-            codeLower.contains(queryLower) || queryLower.contains(codeLower) -> 0.8f
-            descriptionLower.contains(queryLower) || queryLower.contains(descriptionLower) -> 0.75f
-            else -> 0.6f // AI found it, give it reasonable credit
+            // Perfect matches
+            codeLower == queryLower -> {
+                Log.d(TAG, "Perfect code match - confidence: 1.0")
+                1.0f
+            }
+
+            descriptionLower == queryLower -> {
+                Log.d(TAG, "Perfect description match - confidence: 0.95")
+                0.95f
+            }
+
+            // Very high confidence - exact code or strong word matches
+            codeLower.contains(queryLower) || queryLower.contains(codeLower) -> {
+                Log.d(TAG, "Code substring match - confidence: 0.9")
+                0.9f
+            }
+
+            // High confidence - good description matches or word overlaps
+            hasStrongWordOverlap(queryLower, descriptionLower) -> {
+                val score = calculateWordOverlapScore(queryLower, descriptionLower)
+                Log.d(TAG, "Strong word overlap - confidence: $score")
+                score
+            }
+
+            // Medium-high confidence - partial description matches
+            descriptionLower.contains(queryLower) || queryLower.contains(descriptionLower) -> {
+                Log.d(TAG, "Description substring match - confidence: 0.8")
+                0.8f
+            }
+
+            // Medium confidence - fuzzy matching found it with some similarity
+            hasNumberSimilarity(queryLower, codeLower) || hasNumberSimilarity(
+                queryLower,
+                descriptionLower
+            ) -> {
+                Log.d(TAG, "Number similarity detected - confidence: 0.85")
+                0.85f
+            }
+
+            // Default for AI/fuzzy matches - higher than before since our fuzzy matching is now better
+            else -> {
+                Log.d(TAG, "Fuzzy match (AI found it) - confidence: 0.8")
+                0.8f
+            }
+        }
+    }
+
+    private fun hasStrongWordOverlap(query: String, description: String): Boolean {
+        val queryWords = query.split(" ").filter { it.length > 2 }.toSet()
+        val descWords = description.split(" ").filter { it.length > 2 }.toSet()
+
+        if (queryWords.isEmpty()) return false
+
+        val commonWords = queryWords.intersect(descWords)
+        val overlapRatio = commonWords.size.toFloat() / queryWords.size
+
+        return overlapRatio >= 0.6f // 60% or more words match
+    }
+
+    private fun calculateWordOverlapScore(query: String, description: String): Float {
+        val queryWords = query.split(" ").filter { it.length > 2 }
+        val descWords = description.split(" ").filter { it.length > 2 }
+
+        if (queryWords.isEmpty()) return 0.75f
+
+        val exactMatches = queryWords.count { queryWord ->
+            descWords.any { descWord -> queryWord.equals(descWord, ignoreCase = true) }
+        }
+
+        val partialMatches = queryWords.count { queryWord ->
+            descWords.any { descWord ->
+                !queryWord.equals(descWord, ignoreCase = true) && (
+                        queryWord.contains(descWord, ignoreCase = true) ||
+                                descWord.contains(queryWord, ignoreCase = true) ||
+                                (queryWord.length > 3 && descWord.length > 3 &&
+                                        queryWord.take(3)
+                                            .equals(descWord.take(3), ignoreCase = true))
+                        )
+            }
+        }
+
+        val exactRatio = exactMatches.toFloat() / queryWords.size
+        val partialRatio = partialMatches.toFloat() / queryWords.size
+        val combinedScore = exactRatio + (partialRatio * 0.5f)
+
+        // Convert to confidence score (0.75 - 0.95 range for strong matches)
+        return minOf(0.95f, 0.75f + (combinedScore * 0.2f))
+    }
+
+    private fun hasNumberSimilarity(query: String, text: String): Boolean {
+        val queryNumbers = Regex("\\d+").findAll(query).map { it.value.toIntOrNull() ?: 0 }.toList()
+        val textNumbers = Regex("\\d+").findAll(text).map { it.value.toIntOrNull() ?: 0 }.toList()
+
+        if (queryNumbers.isEmpty() || textNumbers.isEmpty()) return false
+
+        // Check for exact matches or close numbers
+        return queryNumbers.any { queryNum ->
+            textNumbers.any { textNum ->
+                queryNum == textNum ||
+                        kotlin.math.abs(queryNum - textNum) <= 10 ||
+                        (queryNum >= 100 && textNum >= 10 &&
+                                queryNum.toString().take(2) == textNum.toString().take(2))
+            }
         }
     }
 
