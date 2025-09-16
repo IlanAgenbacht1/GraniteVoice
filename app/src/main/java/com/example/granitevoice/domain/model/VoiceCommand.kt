@@ -310,6 +310,8 @@ data class ItemDisplayInfo(
  */
 sealed class CommandIntent {
     object StockLookup : CommandIntent()
+    data class CreateOrderItem(val itemName: String, val quantity: Int) : CommandIntent()
+    data class CheckOrderStatus(val orderId: String) : CommandIntent()
     object Unknown : CommandIntent()
     data class Other(val description: String) : CommandIntent()
 }

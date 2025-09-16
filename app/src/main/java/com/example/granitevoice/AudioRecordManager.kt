@@ -30,6 +30,9 @@ class AudioRecorderManager(private val context: Context) {
     private var rawFile: File? = null
     private var rawOutputStream: FileOutputStream? = null
 
+    // Pre-warm flag to avoid repeated initialization
+    private var isPreWarmed = AtomicBoolean(false)
+
     private val TAG = "AudioRecorderManager"
 
     interface RecordingCallback {
@@ -42,6 +45,30 @@ class AudioRecorderManager(private val context: Context) {
         recorderThread = HandlerThread("RecorderThread")
         recorderThread!!.start()
         recorderHandler = Handler(recorderThread!!.looper)
+
+        // Pre-warm the OpenAI client
+        openAIClient.warmUp()
+    }
+
+    /**
+     * Pre-warm the audio recording system to reduce cold start delays
+     * Call this when the app starts or when you expect to use voice commands soon
+     */
+    fun preWarmAudioSystem() {
+        if (isPreWarmed.get()) return
+
+        try {
+            // Pre-create the recording directory if it doesn't exist
+            val musicDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+            if (musicDir != null && !musicDir.exists()) {
+                musicDir.mkdirs()
+            }
+
+            isPreWarmed.set(true)
+            Log.d(TAG, "🔥 Audio system pre-warmed")
+        } catch (e: Exception) {
+            Log.w(TAG, "Pre-warm failed: ${e.message}")
+        }
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)

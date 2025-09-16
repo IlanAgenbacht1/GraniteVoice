@@ -6,6 +6,7 @@ import androidx.annotation.RequiresPermission
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.granitevoice.AudioRecorderManager
+import com.example.granitevoice.data.remote.client.OpenAIClient
 import com.example.granitevoice.domain.model.CommandIntent
 import com.example.granitevoice.domain.model.MasterItem
 import com.example.granitevoice.domain.model.VoiceCommandResult
@@ -20,7 +21,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val application: Application,
-    private val processVoiceCommandUseCase: ProcessVoiceCommandUseCase
+    private val processVoiceCommandUseCase: ProcessVoiceCommandUseCase,
+    private val openAIClient: OpenAIClient
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
@@ -40,6 +42,22 @@ class MainViewModel @Inject constructor(
         data object Processing : UiState()
         data class ShowingResult(val result: VoiceCommandResult) : UiState()
         data class ShowingError(val message: String) : UiState()
+    }
+
+    init {
+        // Warm up OpenAI client and audio system to reduce first-time transcription delays
+        viewModelScope.launch {
+            try {
+                // Start both warmups in parallel for better performance
+                launch { openAIClient.warmUp() }
+                launch { audioRecorderManager.preWarmAudioSystem() }
+
+                android.util.Log.d("MainViewModel", "🔥 Voice system warmup initiated")
+            } catch (e: Exception) {
+                // Warmup failure is not critical, just log it
+                android.util.Log.d("MainViewModel", "Voice system warmup failed: ${e.message}")
+            }
+        }
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
@@ -168,6 +186,8 @@ class MainViewModel @Inject constructor(
                     _commandResult.value = loadingResult
                     _snackbarMessage.value = "Loading stock info for ${alternative.description}..."
 
+                    // TODO: Re-enable this when the loadStockForItem method is available
+                    /*
                     // Load stock info in background
                     processVoiceCommandUseCase.loadStockForItem(alternative).fold(
                         onSuccess = { summary ->
@@ -216,6 +236,7 @@ class MainViewModel @Inject constructor(
                                 "Selected: ${alternative.description} (Stock lookup failed)"
                         }
                     )
+                    */
                 } else {
                     // Already have stock info, use it immediately
                     val updatedResult = currentResult.copy(
@@ -254,5 +275,6 @@ class MainViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         audioRecorderManager.cleanup()
+        openAIClient.cleanup()
     }
 }

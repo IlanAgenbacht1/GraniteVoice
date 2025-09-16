@@ -3,23 +3,16 @@ package com.example.granitevoice.data.remote.client
 import android.content.Context
 import android.util.Log
 import com.example.granitevoice.BuildConfig
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class OpenAIClient(private val context: Context) {
     private val client: OkHttpClient = OkHttpClient()
@@ -34,7 +27,60 @@ class OpenAIClient(private val context: Context) {
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 
+    // Warmed up state tracking
+    private var isWarmedUp = false
+    private val warmupJob = SupervisorJob()
+    private val warmupScope = CoroutineScope(Dispatchers.IO + warmupJob)
+
+    /**
+     * Initialize and warm up the OpenAI client to reduce cold start delays
+     * Call this when the app starts or when you expect to use voice commands soon
+     */
+    fun warmUp() {
+        if (isWarmedUp) return
+
+        Log.d(TAG, "🔥 Warming up OpenAI client...")
+        warmupScope.launch {
+            try {
+                // Make a lightweight test request to establish connection
+                val testRequest = Request.Builder()
+                    .url("https://api.openai.com/v1/models")
+                    .addHeader("Authorization", "Bearer $API_KEY")
+                    .addHeader("User-Agent", "GraniteVoice/1.0")
+                    .build()
+
+                val response = withTimeoutOrNull(5000L) {
+                    client.newCall(testRequest).execute()
+                }
+
+                if (response != null && response.isSuccessful) {
+                    Log.d(TAG, "✅ OpenAI client warmed up successfully")
+                    isWarmedUp = true
+                } else {
+                    Log.d(TAG, "⚠️ OpenAI warmup completed (connection established)")
+                    isWarmedUp = true // Still mark as warmed up since connection is established
+                }
+
+                response?.close()
+            } catch (e: Exception) {
+                Log.d(TAG, "⚠️ OpenAI warmup completed with exception: ${e.message}")
+                isWarmedUp = true // Mark as warmed up to avoid repeated attempts
+            }
+        }
+    }
+
     suspend fun transcribeAudio(filePath: String): Result<String> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "=== Starting audio transcription ===")
+        Log.d(TAG, "Audio file: $filePath")
+        val startTime = System.currentTimeMillis()
+
+        // If not warmed up, do a quick warmup
+        if (!isWarmedUp) {
+            Log.d(TAG, "🔥 Quick warmup before transcription...")
+            warmUp()
+            delay(100) // Brief pause to let warmup start
+        }
+
         try {
             val audioFile = File(filePath)
             if (!audioFile.exists()) {
@@ -42,9 +88,12 @@ class OpenAIClient(private val context: Context) {
                 return@withContext Result.failure(IOException("Audio file not found."))
             }
 
+            Log.d(TAG, "Audio file size: ${audioFile.length()} bytes")
+
             // This is where you can add context to improve transcription accuracy.
-            // It helps the model with spelling of unique names, jargon, or acronyms.
-            val transcriptionPrompt = "Transcribe spoken english words and sentences accurately. Ensure numeric characters are used for numbers."
+            // Consider adding prompts that help with your specific domain
+            val transcriptionPrompt = "Transcribe spoken english words and sentences accurately. " +
+                    "Focus on product names, item codes, inventory terms, and order-related commands."
 
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
@@ -72,28 +121,65 @@ class OpenAIClient(private val context: Context) {
                 .post(requestBody)
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    val errorBody = response.body?.string()
-                    Log.e(TAG, "Transcription API error: ${response.code} - $errorBody")
-                    return@withContext Result.failure(IOException("Transcription failed with code: ${response.code}"))
-                }
-                val responseBody = response.body!!.string()
-                val jsonResponse = JSONObject(responseBody)
+            // Execute with retry logic for reliability
+            val response = executeWithRetry(request)
 
-                // The key in the JSON response is "text".
-                val transcription = jsonResponse.optString("text", "")
+            val duration = System.currentTimeMillis() - startTime
 
-                if (transcription.isNotBlank()) {
-                    Result.success(transcription)
-                } else {
-                    Result.failure(IOException("Transcription result was empty."))
-                }
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string() ?: "Unknown error"
+                Log.e(TAG, "Transcription API error: ${response.code} - $errorBody")
+                return@withContext Result.failure(IOException("Transcription failed with code: ${response.code}"))
             }
+
+            val responseBody = response.body?.string()
+                ?: return@withContext Result.failure(IOException("Empty response body."))
+
+            val jsonResponse = JSONObject(responseBody)
+            val transcription = jsonResponse.optString("text", "")
+
+            if (transcription.isNotBlank()) {
+                Log.d(TAG, "✅ Transcription completed in ${duration}ms: '$transcription'")
+                Result.success(transcription)
+            } else {
+                Result.failure(IOException("Transcription result was empty."))
+            }
+
         } catch (e: Exception) {
-            Log.e(TAG, "Exception during transcription: ${e.message}", e)
+            val duration = System.currentTimeMillis() - startTime
+            Log.e(TAG, "Exception during transcription after ${duration}ms: ${e.message}", e)
             Result.failure(e)
         }
+    }
+
+    /**
+     * Execute HTTP request with retry logic for better reliability
+     */
+    private suspend fun executeWithRetry(request: Request): Response {
+        var lastException: Exception? = null
+
+        repeat(3) { attempt ->
+            try {
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful || response.code == 400) {
+                    // Return successful responses or client errors (don't retry client errors)
+                    return response
+                }
+
+                response.close()
+                Log.d(TAG, "Attempt ${attempt + 1} failed with code ${response.code}, retrying...")
+
+            } catch (e: Exception) {
+                lastException = e
+                Log.d(TAG, "Attempt ${attempt + 1} failed with exception: ${e.message}")
+            }
+
+            if (attempt < 2) {
+                delay(1000L * (attempt + 1)) // Exponential backoff
+            }
+        }
+
+        throw lastException ?: IOException("All retry attempts failed")
     }
 
     suspend fun makeChatRequest(prompt: String): JSONObject = withContext(Dispatchers.IO) {
@@ -149,10 +235,6 @@ class OpenAIClient(private val context: Context) {
         throw IOException("Chat request failed after max retries.")
     }
 
-    fun cleanup() {
-        scope.cancel()
-    }
-
     internal suspend fun makeChatRequestRaw(prompt: String): String = withContext(Dispatchers.IO) {
         try {
             val jsonBody = JSONObject().apply {
@@ -189,44 +271,8 @@ class OpenAIClient(private val context: Context) {
         }
     }
 
-    /*suspend fun fuzzyMatchName(target: String, candidates: List<String>): String? =
-        withContext(Dispatchers.IO) {
-            if (candidates.isEmpty()) return@withContext null
-            val prompt = UtilityPrompts.fuzzyMatchPrompt.replace("{target}", target)
-                .replace("{candidates}", candidates.toString())
-            try {
-                val response = makeChatRequest(prompt)
-                Log.d(TAG, "Fuzzy Match Response: $response")
-                val cleanedResponse = response.toString()
-                    .replace(Regex("(?s)^\\s*```\\w*\\s*\\n?(.*?)\\n?\\s*```\\s*$"), "$1").trim()
-                val json = JSONObject(cleanedResponse)
-                val match =
-                    if (json.has("match") && !json.isNull("match")) json.optString("match") else null
-                Log.d(TAG, "Fuzzy Match Result: $match")
-                match
-            } catch (e: Exception) {
-                Log.e(TAG, "Fuzzy match error: ${e.message}")
-                // Fallback to simple case-insensitive match on error
-                candidates.find { it.trim().equals(target.trim(), ignoreCase = true) }
-            }
-        }
-
-    suspend fun parseCardDescriptionWithAI(fullDesc: String): Pair<String, JSONObject> {
-        if (fullDesc.isBlank()) {
-            return "" to JSONObject()
-        }
-
-        return try {
-            val prompt =
-                UtilityPrompts.descriptionParsingPrompt.replace("{full_description}", fullDesc)
-            val response = makeChatRequest(prompt)
-            val mainDesc = response.optString("main_description", fullDesc)
-            val fields = response.optJSONObject("fields") ?: JSONObject()
-            mainDesc to fields
-        } catch (e: Exception) {
-            Log.e(TAG, "AI parsing of description failed: ${e.message}", e)
-            // Fallback to treating the whole description as the main description
-            fullDesc to JSONObject()
-        }
-    }*/
+    fun cleanup() {
+        scope.cancel()
+        warmupJob.cancel()
+    }
 }

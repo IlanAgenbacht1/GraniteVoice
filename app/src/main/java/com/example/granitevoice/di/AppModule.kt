@@ -12,10 +12,12 @@ import com.example.granitevoice.data.remote.client.FastFuzzyMatchClient
 import com.example.granitevoice.data.remote.MasterItemsGraniteSource
 import com.example.granitevoice.data.remote.StockDetailGraniteSource
 import com.example.granitevoice.data.repository.MasterItemRepositoryImpl
+import com.example.granitevoice.data.repository.OrderRepositoryImpl
 import com.example.granitevoice.data.repository.StockRepositoryImpl
 import com.example.granitevoice.data.repository.VoiceProcessingRepositoryImpl
 import com.example.granitevoice.domain.model.VoiceProcessingConfig
 import com.example.granitevoice.domain.repository.MasterItemRepository
+import com.example.granitevoice.domain.repository.OrderRepository
 import com.example.granitevoice.domain.repository.StockRepository
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
 import com.example.granitevoice.domain.repository.AudioTranscriptionRepository
@@ -75,6 +77,12 @@ object AppModule {
         fastFuzzyMatchClient: FastFuzzyMatchClient
     ): VoiceProcessingRepository {
         return VoiceProcessingRepositoryImpl(openAIClient, fastFuzzyMatchClient)
+    }
+
+    @Provides
+    @Singleton
+    fun provideOrderRepository(): OrderRepository {
+        return OrderRepositoryImpl()
     }
 
     // TODO: Implement these repository implementations
