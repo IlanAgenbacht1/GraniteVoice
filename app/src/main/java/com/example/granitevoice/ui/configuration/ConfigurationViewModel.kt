@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.granitevoice.data.local.preferences.GranitePreferences
 import com.example.granitevoice.data.remote.client.GraniteClient
 import com.example.granitevoice.domain.repository.MasterItemRepository
+import com.example.granitevoice.domain.usecase.OrderUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -32,7 +33,8 @@ data class ConfigurationUiState(
 class ConfigurationViewModel @Inject constructor(
     private val preferences: GranitePreferences,
     private val graniteClient: GraniteClient,
-    private val masterItemRepository: MasterItemRepository
+    private val masterItemRepository: MasterItemRepository,
+    private val orderUseCase: OrderUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConfigurationUiState())
@@ -150,42 +152,85 @@ class ConfigurationViewModel @Inject constructor(
                     // Refresh client to use the saved configuration
                     graniteClient.refreshConfiguration()
 
-                    // Now sync master items
+                    // Now sync master items and orders
                     _uiState.update { it.copy(loadingMessage = "Syncing master items...") }
 
+                    var masterItemsSyncSuccess = false
+                    var ordersSyncSuccess = false
+                    val syncErrors = mutableListOf<String>()
+
                     try {
+                        android.util.Log.d(
+                            "ConfigurationViewModel",
+                            "Starting master items sync..."
+                        )
                         masterItemRepository.syncMasterItems()
-
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                message = "✅ Configuration saved and master items synced! Redirecting...",
-                                loadingMessage = ""
-                            )
-                        }
-
-                        // Add a delay to let user see the success message
-                        delay(2000)
-
-                        _uiState.update {
-                            it.copy(isConfigurationSuccessful = true)
-                        }
-
+                        masterItemsSyncSuccess = true
+                        android.util.Log.d(
+                            "ConfigurationViewModel",
+                            "Master items sync completed successfully"
+                        )
                     } catch (syncException: Exception) {
-                        // Configuration saved but sync failed - still proceed
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                message = "✅ Configuration saved! ⚠️ Master item sync failed: ${syncException.message}",
-                                loadingMessage = ""
-                            )
-                        }
+                        android.util.Log.e(
+                            "ConfigurationViewModel",
+                            "Master items sync failed",
+                            syncException
+                        )
+                        syncErrors.add("Master items: ${syncException.message}")
+                    }
 
-                        delay(3000)
+                    _uiState.update { it.copy(loadingMessage = "Syncing orders...") }
 
-                        _uiState.update {
-                            it.copy(isConfigurationSuccessful = true)
+                    try {
+                        android.util.Log.d("ConfigurationViewModel", "Starting orders sync...")
+                        orderUseCase.syncOrders()
+                        ordersSyncSuccess = true
+                        android.util.Log.d(
+                            "ConfigurationViewModel",
+                            "Orders sync completed successfully"
+                        )
+                    } catch (syncException: Exception) {
+                        android.util.Log.e(
+                            "ConfigurationViewModel",
+                            "Orders sync failed",
+                            syncException
+                        )
+                        syncErrors.add("Orders: ${syncException.message}")
+                    }
+
+                    // Determine final message based on sync results
+                    val finalMessage = when {
+                        masterItemsSyncSuccess && ordersSyncSuccess -> {
+                            "✅ Configuration saved and all data synced! Redirecting..."
                         }
+                        masterItemsSyncSuccess || ordersSyncSuccess -> {
+                            val successItems = mutableListOf<String>()
+                            if (masterItemsSyncSuccess) successItems.add("master items")
+                            if (ordersSyncSuccess) successItems.add("orders")
+                            "✅ Configuration saved! ${successItems.joinToString(", ")} synced. ⚠️ ${
+                                syncErrors.joinToString(
+                                    ", "
+                                )
+                            }"
+                        }
+                        else -> {
+                            "✅ Configuration saved! ⚠️ Data sync failed: ${syncErrors.joinToString(", ")}"
+                        }
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            message = finalMessage,
+                            loadingMessage = ""
+                        )
+                    }
+
+                    // Add a delay to let user see the success message
+                    delay(if (syncErrors.isEmpty()) 2000 else 3000) // Longer delay if there were errors
+
+                    _uiState.update {
+                        it.copy(isConfigurationSuccessful = true)
                     }
 
                 } else {

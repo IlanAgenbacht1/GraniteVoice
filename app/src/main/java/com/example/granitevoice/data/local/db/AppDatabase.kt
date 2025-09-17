@@ -7,16 +7,19 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.granitevoice.data.local.dao.MasterItemDao
+import com.example.granitevoice.data.local.dao.OrderDao
 import com.example.granitevoice.domain.model.MasterItem
+import com.example.granitevoice.domain.model.Order
 
 @Database(
-    entities = [MasterItem::class],
-    version = 3,
+    entities = [MasterItem::class, Order::class],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun masterItemDao(): MasterItemDao
+    abstract fun orderDao(): OrderDao
 
     companion object {
         @Volatile
@@ -77,6 +80,55 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from version 3 to 4 - Add orders table
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Create orders table
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS orders (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        number TEXT NOT NULL,
+                        tradingPartnerCode TEXT NOT NULL,
+                        tradingPartnerDescription TEXT NOT NULL,
+                        createDate TEXT NOT NULL,
+                        site TEXT,
+                        status TEXT NOT NULL,
+                        auditDate TEXT NOT NULL,
+                        auditUser TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        description TEXT,
+                        priority INTEGER,
+                        erpLocation TEXT,
+                        lastSyncAt INTEGER NOT NULL DEFAULT 0
+                    )
+                """
+                )
+
+                // Create indices for orders table
+                database.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS index_orders_number 
+                    ON orders (number)
+                """
+                )
+
+                database.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_orders_status 
+                    ON orders (status)
+                """
+                )
+
+                database.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_orders_tradingPartnerCode 
+                    ON orders (tradingPartnerCode)
+                """
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -84,7 +136,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "granite_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                 INSTANCE = instance
                 instance

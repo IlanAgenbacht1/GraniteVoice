@@ -1,6 +1,6 @@
 package com.example.granitevoice.domain.usecase
 
-import com.example.granitevoice.domain.model.*
+import com.example.granitevoice.domain.model.VoiceCommandResult
 import javax.inject.Inject
 
 /**
@@ -15,18 +15,5 @@ class ProcessVoiceCommandUseCase @Inject constructor(
 
     suspend operator fun invoke(transcription: String): VoiceCommandResult {
         return routeVoiceCommandUseCase(transcription)
-    }
-
-    /**
-     * Load stock information for a specific item on-demand (for lazy loading)
-     * @deprecated This method will be moved to a dedicated stock service in future versions
-     */
-    @Deprecated("Use StockRepository.getItemStockSummary directly")
-    suspend fun loadStockForItem(item: MasterItem): Result<ItemStockSummary> {
-        // This functionality should be moved to a dedicated stock service
-        // For now, we'll throw an UnsupportedOperationException to encourage migration
-        throw UnsupportedOperationException(
-            "loadStockForItem is deprecated. Use StockRepository.getItemStockSummary directly."
-        )
     }
 }

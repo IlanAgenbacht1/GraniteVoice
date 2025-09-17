@@ -4,13 +4,17 @@ import android.content.Context
 import androidx.room.Room
 import androidx.work.WorkManager
 import com.example.granitevoice.data.local.dao.MasterItemDao
+import com.example.granitevoice.data.local.dao.OrderDao
 import com.example.granitevoice.data.local.db.AppDatabase
 import com.example.granitevoice.data.local.preferences.GranitePreferences
 import com.example.granitevoice.data.remote.client.GraniteClient
 import com.example.granitevoice.data.remote.client.OpenAIClient
 import com.example.granitevoice.data.remote.client.FastFuzzyMatchClient
+import com.example.granitevoice.data.remote.client.OrderFuzzyMatchClient
 import com.example.granitevoice.data.remote.MasterItemsGraniteSource
+import com.example.granitevoice.data.remote.OrdersGraniteSource
 import com.example.granitevoice.data.remote.StockDetailGraniteSource
+import com.example.granitevoice.data.remote.OrderProgressGraniteSource
 import com.example.granitevoice.data.repository.MasterItemRepositoryImpl
 import com.example.granitevoice.data.repository.OrderRepositoryImpl
 import com.example.granitevoice.data.repository.StockRepositoryImpl
@@ -22,6 +26,8 @@ import com.example.granitevoice.domain.repository.StockRepository
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
 import com.example.granitevoice.domain.repository.AudioTranscriptionRepository
 import com.example.granitevoice.domain.repository.SyncRepository
+import com.example.granitevoice.domain.usecase.OrderUseCase
+import com.example.granitevoice.domain.usecase.ProcessOrderStatusUseCase
 import com.google.gson.Gson
 import dagger.Module
 import dagger.Provides
@@ -42,7 +48,11 @@ object AppModule {
             AppDatabase::class.java,
             "granite_database"
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4
+            )
             .build()
     }
 
@@ -50,6 +60,12 @@ object AppModule {
     @Singleton
     fun provideMasterItemDao(db: AppDatabase): MasterItemDao {
         return db.masterItemDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideOrderDao(db: AppDatabase): OrderDao {
+        return db.orderDao()
     }
 
     // Repository Interfaces (Domain Layer)
@@ -74,15 +90,47 @@ object AppModule {
     @Singleton
     fun provideVoiceProcessingRepository(
         openAIClient: OpenAIClient,
-        fastFuzzyMatchClient: FastFuzzyMatchClient
+        fastFuzzyMatchClient: FastFuzzyMatchClient,
+        orderFuzzyMatchClient: OrderFuzzyMatchClient
     ): VoiceProcessingRepository {
-        return VoiceProcessingRepositoryImpl(openAIClient, fastFuzzyMatchClient)
+        return VoiceProcessingRepositoryImpl(
+            openAIClient,
+            fastFuzzyMatchClient,
+            orderFuzzyMatchClient
+        )
     }
 
     @Provides
     @Singleton
-    fun provideOrderRepository(): OrderRepository {
-        return OrderRepositoryImpl()
+    fun provideOrderRepository(
+        orderDao: OrderDao,
+        ordersGraniteSource: OrdersGraniteSource
+    ): OrderRepository {
+        return OrderRepositoryImpl(orderDao, ordersGraniteSource)
+    }
+
+    // Use Cases (Domain Layer)
+    @Provides
+    @Singleton
+    fun provideOrderUseCase(
+        orderRepository: OrderRepositoryImpl,
+        orderProgressGraniteSource: OrderProgressGraniteSource
+    ): OrderUseCase {
+        return OrderUseCase(orderRepository, orderProgressGraniteSource)
+    }
+
+    @Provides
+    @Singleton
+    fun provideProcessOrderStatusUseCase(
+        orderUseCase: OrderUseCase,
+        voiceProcessingRepository: VoiceProcessingRepository,
+        config: VoiceProcessingConfig
+    ): ProcessOrderStatusUseCase {
+        return ProcessOrderStatusUseCase(
+            orderUseCase,
+            voiceProcessingRepository,
+            config
+        )
     }
 
     // TODO: Implement these repository implementations
@@ -115,11 +163,29 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideOrdersGraniteSource(
+        graniteClient: GraniteClient,
+        gson: Gson
+    ): OrdersGraniteSource {
+        return OrdersGraniteSource(graniteClient, gson)
+    }
+
+    @Provides
+    @Singleton
     fun provideStockDetailGraniteSource(
         graniteClient: GraniteClient,
         gson: Gson
     ): StockDetailGraniteSource {
         return StockDetailGraniteSource(graniteClient, gson)
+    }
+
+    @Provides
+    @Singleton
+    fun provideOrderProgressGraniteSource(
+        graniteClient: GraniteClient,
+        gson: Gson
+    ): OrderProgressGraniteSource {
+        return OrderProgressGraniteSource(graniteClient, gson)
     }
 
     // External Clients (Data Layer)
@@ -139,6 +205,12 @@ object AppModule {
     @Singleton
     fun provideFastFuzzyMatchClient(): FastFuzzyMatchClient {
         return FastFuzzyMatchClient()
+    }
+
+    @Provides
+    @Singleton
+    fun provideOrderFuzzyMatchClient(): OrderFuzzyMatchClient {
+        return OrderFuzzyMatchClient()
     }
 
     @Provides

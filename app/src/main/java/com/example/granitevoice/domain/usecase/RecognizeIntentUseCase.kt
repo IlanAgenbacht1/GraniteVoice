@@ -18,31 +18,9 @@ class RecognizeIntentUseCase @Inject constructor() {
         val lowerTranscription = transcription.lowercase()
         Log.d(TAG, "Normalized: '$lowerTranscription'")
 
-        // Check for order creation intent first (most specific)
-        val orderCreationKeywords = listOf(
-            "create order", "add order", "make order", "new order",
-            "order", "add to cart", "add item", "purchase"
-        )
-
-        val orderCreationMatch = checkForOrderCreation(lowerTranscription, orderCreationKeywords)
-        if (orderCreationMatch != null) {
-            val duration = System.currentTimeMillis() - startTime
-            Log.d(TAG, " Intent: CreateOrderItem (${duration}ms)")
-            Log.d(
-                TAG,
-                "Item: '${orderCreationMatch.itemName}', Quantity: ${orderCreationMatch.quantity}"
-            )
-            Log.d(TAG, "=== Intent recognition completed ===")
-            return orderCreationMatch
-        }
-
-        // Check for order status intent
-        val orderStatusKeywords = listOf(
-            "check order", "order status", "status of order", "order info",
-            "where is order", "track order", "find order"
-        )
-
-        val orderStatusMatch = checkForOrderStatus(lowerTranscription, orderStatusKeywords)
+        // Enhanced order status detection using patterns instead of simple keywords
+        Log.d(TAG, "=== Checking for order status intent (enhanced patterns) ===")
+        val orderStatusMatch = checkForOrderStatusEnhanced(lowerTranscription)
         if (orderStatusMatch != null) {
             val duration = System.currentTimeMillis() - startTime
             Log.d(TAG, " Intent: CheckOrderStatus (${duration}ms)")
@@ -51,7 +29,10 @@ class RecognizeIntentUseCase @Inject constructor() {
             return orderStatusMatch
         }
 
+        Log.d(TAG, " Order status intent not detected, checking stock intent...")
+
         // Check for stock lookup intent (existing logic)
+        Log.d(TAG, "=== Checking for stock lookup intent ===")
         val stockKeywords = listOf(
             "stock", "inventory", "item", "product", "part", "component",
             "lookup", "look up", "find", "search", "get", "show", "check",
@@ -60,6 +41,7 @@ class RecognizeIntentUseCase @Inject constructor() {
         )
 
         Log.d(TAG, "Checking against ${stockKeywords.size} stock keywords")
+        Log.d(TAG, "Stock keywords: ${stockKeywords.joinToString(", ")}")
 
         val matchedKeywords = mutableListOf<String>()
         val hasStockIntent = stockKeywords.any { keyword ->
@@ -98,106 +80,125 @@ class RecognizeIntentUseCase @Inject constructor() {
         return intent
     }
 
-    private fun checkForOrderCreation(
-        transcription: String,
-        keywords: List<String>
-    ): CommandIntent.CreateOrderItem? {
-        Log.d(TAG, "Checking for order creation intent...")
+    /**
+     * Enhanced order status detection using flexible patterns
+     */
+    private fun checkForOrderStatusEnhanced(transcription: String): CommandIntent.CheckOrderStatus? {
+        Log.d(TAG, "Checking for order status with enhanced patterns...")
+        Log.d(TAG, "Input: '$transcription'")
 
-        val hasOrderKeyword = keywords.any { keyword ->
-            val matches = transcription.contains(keyword)
-            if (matches) {
-                Log.d(TAG, "  Matched order keyword: '$keyword'")
-            }
-            matches
-        }
+        // Define flexible patterns that capture order intent variations
+        val orderIntentPatterns = listOf(
+            // Pattern 1: "show/get/tell me [the] order [anything]"
+            Regex("(?:show me|get me|tell me) (?:the )?order\\s+(.+?)(?:[.,!?]|\\s*$)"),
 
-        if (!hasOrderKeyword) {
-            Log.d(TAG, "No order creation keywords found")
-            return null
-        }
+            // Pattern 2: "order [ID/name] [status context]"
+            Regex("order\\s+([\\w\\d\\s-_]+?)\\s*(?:status|info|details|progress)?(?:[.,!?]|\\s*$)"),
 
-        // Try to extract item name and quantity
-        // Patterns like: "create order for ABC123 quantity 5", "order 10 of item XYZ"
-        val patterns = listOf(
-            // "create order for [item] quantity [number]"
-            Regex("(?:create|add|make|new)?\\s*order\\s+(?:for\\s+)?([a-zA-Z0-9\\s-_]+?)\\s+(?:quantity|qty|count)\\s+(\\d+)"),
-            // "order [number] of [item]"  
-            Regex("order\\s+(\\d+)\\s+(?:of|pieces|units)?\\s+(?:of\\s+)?([a-zA-Z0-9\\s-_]+)"),
-            // "[number] of [item]"
-            Regex("(\\d+)\\s+(?:of|pieces|units)?\\s+(?:of\\s+)?([a-zA-Z0-9\\s-_]+)"),
-            // "add [item] [number]"
-            Regex("(?:add|purchase)\\s+([a-zA-Z0-9\\s-_]+?)\\s+(\\d+)"),
-            // Generic fallback: assume last number is quantity, everything else is item
-            Regex("([a-zA-Z0-9\\s-_]+?)\\s+(\\d+)\\s*$")
+            // Pattern 3: "[check/track/find] [the] order [anything]"
+            Regex("(?:check|track|find) (?:the )?order\\s+(.+?)(?:[.,!?]|\\s*$)"),
+
+            // Pattern 4: "what is/where is [the] order [anything]"
+            Regex("(?:what is|where is) (?:the )?order\\s+(.+?)(?:[.,!?]|\\s*$)"),
+
+            // Pattern 5: "order status for/of [anything]"
+            Regex("order status (?:for|of)\\s+(.+?)(?:[.,!?]|\\s*$)"),
+
+            // Pattern 6: "status of order [anything]"
+            Regex("status of order\\s+(.+?)(?:[.,!?]|\\s*$)"),
+
+            // Pattern 7: Any sentence with "order" and "status" words
+            Regex(".*order.*status.*"),
+
+            // Pattern 8: Any sentence with "order" and NOT stock-specific words
+            Regex(".*order\\s+([\\w\\d\\s-_]+?)(?:[.,!?]|\\s*$)")
         )
 
-        for (pattern in patterns) {
+        for ((index, pattern) in orderIntentPatterns.withIndex()) {
+            Log.d(TAG, "  Testing pattern ${index + 1}: ${pattern.pattern}")
+
             val match = pattern.find(transcription)
-            if (match != null && match.groupValues.size >= 3) {
-                val group1 = match.groupValues[1].trim()
-                val group2 = match.groupValues[2].trim()
+            if (match != null) {
+                Log.d(TAG, "  Pattern ${index + 1} matched: '${match.value}'")
 
-                // Determine which group is item name and which is quantity
-                val quantityInt = group2.toIntOrNull() ?: group1.toIntOrNull()
-                val itemName = if (group2.toIntOrNull() != null) group1 else group2
-
-                if (quantityInt != null && quantityInt > 0 && itemName.isNotBlank()) {
-                    Log.d(
-                        TAG,
-                        "Extracted order details - Item: '$itemName', Quantity: $quantityInt"
-                    )
-                    return CommandIntent.CreateOrderItem(itemName.trim(), quantityInt)
+                // For patterns that capture an ID/name, extract it
+                if (match.groupValues.size > 1) {
+                    val extractedId = match.groupValues[1].trim()
+                    if (extractedId.isNotBlank()) {
+                        Log.d(TAG, "  Extracted order ID: '$extractedId'")
+                        return CommandIntent.CheckOrderStatus(extractedId)
+                    }
                 }
+
+                // For Pattern 7 (order + status words), try to extract ID from whole string
+                if (index == 6) { // Pattern 7
+                    val orderIdExtracted = extractOrderIdFromStatusContext(transcription)
+                    if (orderIdExtracted != null) {
+                        Log.d(TAG, "  Extracted order ID from context: '$orderIdExtracted'")
+                        return CommandIntent.CheckOrderStatus(orderIdExtracted)
+                    }
+                }
+
+                // For Pattern 8, make sure it's not a stock command
+                if (index == 7) { // Pattern 8 
+                    if (!hasStockSpecificWords(transcription)) {
+                        val extractedId = match.groupValues[1].trim()
+                        if (extractedId.isNotBlank()) {
+                            Log.d(TAG, "  Non-stock order command, extracted ID: '$extractedId'")
+                            return CommandIntent.CheckOrderStatus(extractedId)
+                        }
+                    } else {
+                        Log.d(
+                            TAG,
+                            "  Pattern ${index + 1} matches but contains stock-specific words"
+                        )
+                    }
+                }
+            } else {
+                Log.d(TAG, "  Pattern ${index + 1} did not match")
             }
         }
 
-        Log.d(TAG, "Could not extract item name and quantity from order command")
+        Log.d(TAG, "❌ No order status patterns matched")
         return null
     }
 
-    private fun checkForOrderStatus(
-        transcription: String,
-        keywords: List<String>
-    ): CommandIntent.CheckOrderStatus? {
-        Log.d(TAG, "Checking for order status intent...")
-
-        val hasStatusKeyword = keywords.any { keyword ->
-            val matches = transcription.contains(keyword)
-            if (matches) {
-                Log.d(TAG, "  Matched order status keyword: '$keyword'")
-            }
-            matches
-        }
-
-        if (!hasStatusKeyword) {
-            Log.d(TAG, "No order status keywords found")
-            return null
-        }
-
-        // Try to extract order ID
-        // Patterns like: "check order ABC123", "status of order 12345", "where is order XYZ-456"
-        val patterns = listOf(
-            // "check/track/find order [ID]"
-            Regex("(?:check|track|find|status\\s+of)\\s+order\\s+([a-zA-Z0-9\\s-_]+)"),
-            // "order [ID] status"
-            Regex("order\\s+([a-zA-Z0-9\\s-_]+?)\\s+(?:status|info)"),
-            // Generic "order [ID]" pattern
-            Regex("order\\s+([a-zA-Z0-9\\s-_]+)")
+    /**
+     * Extract order ID when we know it's an order status context
+     */
+    private fun extractOrderIdFromStatusContext(transcription: String): String? {
+        // Look for order-like identifiers in status context
+        val orderIdPatterns = listOf(
+            Regex("order\\s+([\\w\\d\\s-_]+?)(?:\\s+status|$)"),
+            Regex("status.*order\\s+([\\w\\d\\s-_]+?)(?:[.,!?]|$)"),
+            Regex("\\b(ord[\\s-]*\\d+[\\w\\d-]*)\\b"),
+            Regex("\\b([\\w\\d]{3,})\\b") // Any alphanumeric 3+ chars as fallback
         )
 
-        for (pattern in patterns) {
+        for (pattern in orderIdPatterns) {
             val match = pattern.find(transcription)
-            if (match != null && match.groupValues.size >= 2) {
-                val orderId = match.groupValues[1].trim()
-                if (orderId.isNotBlank()) {
-                    Log.d(TAG, "Extracted order ID: '$orderId'")
-                    return CommandIntent.CheckOrderStatus(orderId)
+            if (match != null && match.groupValues.size > 1) {
+                val extracted = match.groupValues[1].trim()
+                if (extracted.isNotEmpty()) {
+                    return extracted
                 }
             }
         }
-
-        Log.d(TAG, "Could not extract order ID from status command")
         return null
+    }
+
+    /**
+     * Check if transcription contains stock-specific words that suggest it's not an order command
+     */
+    private fun hasStockSpecificWords(transcription: String): Boolean {
+        val stockSpecificWords = listOf(
+            "inventory", "stock level", "in stock", "out of stock",
+            "stock detail", "quantity available", "warehouse", "location",
+            "product", "item", "part", "component"
+        )
+
+        return stockSpecificWords.any { word ->
+            transcription.contains(word, ignoreCase = true)
+        }
     }
 }

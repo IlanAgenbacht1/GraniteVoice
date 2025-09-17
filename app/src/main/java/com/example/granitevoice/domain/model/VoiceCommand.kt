@@ -1,5 +1,7 @@
 package com.example.granitevoice.domain.model
 
+import com.example.granitevoice.domain.usecase.OrderStatusInfo
+
 /**
  * Represents the result of voice command processing
  */
@@ -14,6 +16,8 @@ data class VoiceCommandResult(
     // New fields for multiple stock lookups
     val stockSummaries: Map<String, ItemStockSummary> = emptyMap(),
     val stockLookupErrors: Map<String, String> = emptyMap(),
+    // Order status information
+    val orderStatusInfo: OrderStatusInfo? = null,
     // Legacy fields for backward compatibility
     val stockSummary: ItemStockSummary? = null,
     val stockLookupError: String? = null
@@ -23,6 +27,17 @@ data class VoiceCommandResult(
      */
     fun getResultSummary(): String {
         return when {
+            // Order status results
+            orderStatusInfo != null -> {
+                val orderInfo = orderStatusInfo
+                if (orderInfo.orderProgress != null) {
+                    "Order ${orderInfo.orderNumber}: ${orderInfo.orderProgress.getProgressSummary()}"
+                } else {
+                    "Order ${orderInfo.orderNumber}: ${orderInfo.statusDisplay}"
+                }
+            }
+
+            // Stock lookup results
             matchedItem != null && stockSummaries.isNotEmpty() -> {
                 val primaryMatchSummary = stockSummaries[matchedItem.code]
                 if (primaryMatchSummary != null) {
@@ -68,6 +83,33 @@ data class VoiceCommandResult(
      */
     fun getStatusMessage(): String {
         return when {
+            // Order status results
+            orderStatusInfo != null -> {
+                val orderInfo = orderStatusInfo
+                when {
+                    orderInfo.orderProgress?.isComplete() == true -> {
+                        "✅ ${orderInfo.orderProgress.getProgressSummary()}"
+                    }
+
+                    orderInfo.orderProgress?.isBlocked() == true -> {
+                        "❌ ${orderInfo.orderProgress.getProgressSummary()}"
+                    }
+
+                    orderInfo.orderProgress?.isInProgress() == true -> {
+                        "🚚 ${orderInfo.orderProgress.getProgressSummary()}"
+                    }
+
+                    orderInfo.orderProgress != null -> {
+                        "📋 ${orderInfo.orderProgress.getProgressSummary()}"
+                    }
+
+                    else -> {
+                        "📋 Order ${orderInfo.orderNumber}: ${orderInfo.statusDisplay}"
+                    }
+                }
+            }
+
+            // Stock lookup results
             hasCompleteStockInfo() -> {
                 if (stockSummaries.values.all { it.isInStock() }) {
                     "✅ In Stock: ${
@@ -102,7 +144,7 @@ data class VoiceCommandResult(
             }
 
             else -> {
-                "❌ Command not understood. Try: 'Find stock for [item name]'"
+                "❌ Command not understood. Try: 'Find stock for [item name]' or 'Check order [number]'"
             }
         }
     }
@@ -310,7 +352,6 @@ data class ItemDisplayInfo(
  */
 sealed class CommandIntent {
     object StockLookup : CommandIntent()
-    data class CreateOrderItem(val itemName: String, val quantity: Int) : CommandIntent()
     data class CheckOrderStatus(val orderId: String) : CommandIntent()
     object Unknown : CommandIntent()
     data class Other(val description: String) : CommandIntent()

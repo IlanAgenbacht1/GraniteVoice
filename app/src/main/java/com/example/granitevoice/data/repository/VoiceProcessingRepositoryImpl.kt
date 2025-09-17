@@ -3,13 +3,16 @@ package com.example.granitevoice.data.repository
 import android.util.Log
 import com.example.granitevoice.data.remote.client.FastFuzzyMatchClient
 import com.example.granitevoice.data.remote.client.OpenAIClient
+import com.example.granitevoice.data.remote.client.OrderFuzzyMatchClient
 import com.example.granitevoice.domain.model.MasterItem
+import com.example.granitevoice.domain.model.Order
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
 import javax.inject.Inject
 
 class VoiceProcessingRepositoryImpl @Inject constructor(
     private val openAIClient: OpenAIClient,
-    private val fastFuzzyMatchClient: FastFuzzyMatchClient
+    private val fastFuzzyMatchClient: FastFuzzyMatchClient,
+    private val orderFuzzyMatchClient: OrderFuzzyMatchClient
 ) : VoiceProcessingRepository {
 
     companion object {
@@ -157,6 +160,73 @@ class VoiceProcessingRepositoryImpl @Inject constructor(
             Log.e(TAG, "❌ Hybrid matching failed after ${totalDuration}ms", e)
             Log.d(TAG, "=== Hybrid fuzzy matching completed (with error) ===")
             Result.success(emptyList())
+        }
+    }
+
+    override suspend fun findSimilarOrders(
+        orderQuery: String,
+        customerQuery: String?,
+        candidates: List<Order>,
+        maxResults: Int
+    ): Result<List<Pair<Order, Float>>> {
+        Log.d(TAG, "=== Starting generic order fuzzy matching ===")
+        Log.d(TAG, "Order query: '$orderQuery'")
+        Log.d(TAG, "Customer query: '$customerQuery'")
+        Log.d(TAG, "Candidates: ${candidates.size} orders")
+        val startTime = System.currentTimeMillis()
+
+        return try {
+            if (candidates.isEmpty()) {
+                Log.w(TAG, "❌ No order candidates provided for matching")
+                return Result.success(emptyList())
+            }
+
+            // Delegate to the OrderFuzzyMatchClient for sophisticated algorithmic matching
+            Log.d(TAG, "🚀 Using algorithmic order fuzzy matching...")
+
+            val result = orderFuzzyMatchClient.findSimilarOrders(
+                orderQuery = orderQuery,
+                customerQuery = customerQuery,
+                candidates = candidates,
+                maxResults = maxResults
+            )
+
+            result.fold(
+                onSuccess = { matches ->
+                    val totalDuration = System.currentTimeMillis() - startTime
+                    Log.d(TAG, "✅ Order fuzzy matching completed in ${totalDuration}ms")
+                    Log.d(TAG, "Found ${matches.size} similar orders")
+
+                    matches.forEachIndexed { index, (order, similarity) ->
+                        if (index < 3) { // Log first 3 for debugging
+                            Log.d(
+                                TAG,
+                                "  ${index + 1}. ${order.number} (${order.tradingPartnerDescription}) - score: ${
+                                    String.format(
+                                        "%.3f",
+                                        similarity
+                                    )
+                                }"
+                            )
+                        }
+                    }
+
+                    Log.d(TAG, "=== Generic order fuzzy matching completed ===")
+                    Result.success(matches)
+                },
+                onFailure = { exception ->
+                    val totalDuration = System.currentTimeMillis() - startTime
+                    Log.e(TAG, "❌ Order fuzzy matching failed after ${totalDuration}ms", exception)
+                    Log.d(TAG, "=== Generic order fuzzy matching completed (with error) ===")
+                    Result.failure(exception)
+                }
+            )
+
+        } catch (e: Exception) {
+            val totalDuration = System.currentTimeMillis() - startTime
+            Log.e(TAG, "❌ Generic order fuzzy matching error after ${totalDuration}ms", e)
+            Log.d(TAG, "=== Generic order fuzzy matching completed (with error) ===")
+            Result.failure(e)
         }
     }
 

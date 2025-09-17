@@ -11,18 +11,21 @@ import com.example.granitevoice.domain.model.CommandIntent
 import com.example.granitevoice.domain.model.MasterItem
 import com.example.granitevoice.domain.model.VoiceCommandResult
 import com.example.granitevoice.domain.usecase.ProcessVoiceCommandUseCase
+import com.example.granitevoice.domain.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val application: Application,
     private val processVoiceCommandUseCase: ProcessVoiceCommandUseCase,
-    private val openAIClient: OpenAIClient
+    private val openAIClient: OpenAIClient,
+    private val stockRepository: StockRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
@@ -99,9 +102,12 @@ class MainViewModel @Inject constructor(
                 is CommandIntent.StockLookup -> {
                     handleStockLookupResult(result)
                 }
+                is CommandIntent.CheckOrderStatus -> {
+                    handleOrderStatusResult(result)
+                }
                 is CommandIntent.Unknown -> {
                     _snackbarMessage.value =
-                        "I didn't understand that command. Try: 'Find stock for [item name]'"
+                        "I didn't understand that command. Try: 'Find stock for [item name]' or 'Check order [number]'"
                     _uiState.update { UiState.Idle }
                 }
                 else -> {
@@ -152,6 +158,34 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    private fun handleOrderStatusResult(result: VoiceCommandResult) {
+        _uiState.update { UiState.ShowingResult(result) }
+
+        when {
+            result.orderStatusInfo != null -> {
+                // We have detailed order status information
+                val orderInfo = result.orderStatusInfo
+                val progressText = if (orderInfo.orderProgress != null) {
+                    orderInfo.orderProgress.getProgressSummary()
+                } else {
+                    "Order ${orderInfo.orderNumber}: ${orderInfo.statusDisplay}"
+                }
+                _snackbarMessage.value = "📋 $progressText"
+            }
+
+            result.stockLookupErrors.isNotEmpty() -> {
+                // Order lookup failed
+                val errorMessages = result.stockLookupErrors.values.joinToString(", ")
+                _snackbarMessage.value = "❌ $errorMessages"
+            }
+
+            else -> {
+                // Generic fallback
+                _snackbarMessage.value = "Order status command processed"
+            }
+        }
+    }
+
     fun cancelRecording() {
         audioRecorderManager.cancelRecording()
         _uiState.update { UiState.Idle }
@@ -186,45 +220,70 @@ class MainViewModel @Inject constructor(
                     _commandResult.value = loadingResult
                     _snackbarMessage.value = "Loading stock info for ${alternative.description}..."
 
-                    // TODO: Re-enable this when the loadStockForItem method is available
-                    /*
                     // Load stock info in background
-                    processVoiceCommandUseCase.loadStockForItem(alternative).fold(
-                        onSuccess = { summary ->
-                            // Update with loaded stock info
-                            val updatedStockSummaries = currentResult.stockSummaries.toMutableMap()
-                            updatedStockSummaries[alternative.code] = summary
+                    try {
+                        val result = withTimeoutOrNull(5000L) {
+                            stockRepository.getItemStockSummary(alternative)
+                        }
 
-                            val finalResult = currentResult.copy(
-                                matchedItem = alternative,
-                                confidence = 1.0f,
-                                stockSummaries = updatedStockSummaries,
-                                stockSummary = summary,
-                                stockLookupError = null,
-                                alternativeMatches = if (currentResult.matchedItem != null) {
-                                    listOf(currentResult.matchedItem) + currentResult.alternativeMatches.filter { it.code != alternative.code }
-                                } else {
-                                    currentResult.alternativeMatches.filter { it.code != alternative.code }
-                                }
-                            )
-                            _commandResult.value = finalResult
+                        result?.fold(
+                            onSuccess = { summary ->
+                                // Update with loaded stock info
+                                val updatedStockSummaries =
+                                    currentResult.stockSummaries.toMutableMap()
+                                updatedStockSummaries[alternative.code] = summary
 
-                            val status = if (summary.isInStock()) "✅" else "❌"
-                            _snackbarMessage.value =
-                                "$status Selected: ${alternative.description} - ${summary.getTotalQuantityDisplay()}"
-                        },
-                        onFailure = { exception ->
-                            // Update with error
+                                val finalResult = currentResult.copy(
+                                    matchedItem = alternative,
+                                    confidence = 1.0f,
+                                    stockSummaries = updatedStockSummaries,
+                                    stockSummary = summary,
+                                    stockLookupError = null,
+                                    alternativeMatches = if (currentResult.matchedItem != null) {
+                                        listOf(currentResult.matchedItem) + currentResult.alternativeMatches.filter { it.code != alternative.code }
+                                    } else {
+                                        currentResult.alternativeMatches.filter { it.code != alternative.code }
+                                    }
+                                )
+                                _commandResult.value = finalResult
+
+                                val status = if (summary.isInStock()) "✅" else "❌"
+                                _snackbarMessage.value =
+                                    "$status Selected: ${alternative.description} - ${summary.getTotalQuantityDisplay()}"
+                            },
+                            onFailure = { exception ->
+                                // Update with error
+                                val updatedErrors = currentResult.stockLookupErrors.toMutableMap()
+                                updatedErrors[alternative.code] =
+                                    exception.message ?: "Stock lookup failed"
+
+                                val finalResult = currentResult.copy(
+                                    matchedItem = alternative,
+                                    confidence = 1.0f,
+                                    stockLookupErrors = updatedErrors,
+                                    stockSummary = null,
+                                    stockLookupError = exception.message ?: "Stock lookup failed",
+                                    alternativeMatches = if (currentResult.matchedItem != null) {
+                                        listOf(currentResult.matchedItem) + currentResult.alternativeMatches.filter { it.code != alternative.code }
+                                    } else {
+                                        currentResult.alternativeMatches.filter { it.code != alternative.code }
+                                    }
+                                )
+                                _commandResult.value = finalResult
+                                _snackbarMessage.value =
+                                    "Selected: ${alternative.description} (Stock lookup failed)"
+                            }
+                        ) ?: run {
+                            // Timeout occurred
                             val updatedErrors = currentResult.stockLookupErrors.toMutableMap()
-                            updatedErrors[alternative.code] =
-                                exception.message ?: "Stock lookup failed"
+                            updatedErrors[alternative.code] = "Stock lookup timed out"
 
                             val finalResult = currentResult.copy(
                                 matchedItem = alternative,
                                 confidence = 1.0f,
                                 stockLookupErrors = updatedErrors,
                                 stockSummary = null,
-                                stockLookupError = exception.message ?: "Stock lookup failed",
+                                stockLookupError = "Stock lookup timed out",
                                 alternativeMatches = if (currentResult.matchedItem != null) {
                                     listOf(currentResult.matchedItem) + currentResult.alternativeMatches.filter { it.code != alternative.code }
                                 } else {
@@ -233,10 +292,29 @@ class MainViewModel @Inject constructor(
                             )
                             _commandResult.value = finalResult
                             _snackbarMessage.value =
-                                "Selected: ${alternative.description} (Stock lookup failed)"
+                                "Selected: ${alternative.description} (Stock lookup timed out)"
                         }
-                    )
-                    */
+                    } catch (e: Exception) {
+                        // Handle unexpected exceptions
+                        val updatedErrors = currentResult.stockLookupErrors.toMutableMap()
+                        updatedErrors[alternative.code] = e.message ?: "Unexpected error"
+
+                        val finalResult = currentResult.copy(
+                            matchedItem = alternative,
+                            confidence = 1.0f,
+                            stockLookupErrors = updatedErrors,
+                            stockSummary = null,
+                            stockLookupError = e.message ?: "Unexpected error",
+                            alternativeMatches = if (currentResult.matchedItem != null) {
+                                listOf(currentResult.matchedItem) + currentResult.alternativeMatches.filter { it.code != alternative.code }
+                            } else {
+                                currentResult.alternativeMatches.filter { it.code != alternative.code }
+                            }
+                        )
+                        _commandResult.value = finalResult
+                        _snackbarMessage.value =
+                            "Selected: ${alternative.description} (Stock lookup error)"
+                    }
                 } else {
                     // Already have stock info, use it immediately
                     val updatedResult = currentResult.copy(

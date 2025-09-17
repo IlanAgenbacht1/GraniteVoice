@@ -11,8 +11,7 @@ import javax.inject.Inject
 class RouteVoiceCommandUseCase @Inject constructor(
     private val recognizeIntentUseCase: RecognizeIntentUseCase,
     private val processStockLookupUseCase: ProcessStockLookupUseCase,
-    private val createOrderItemUseCase: CreateOrderItemUseCase,
-    private val checkOrderStatusUseCase: CheckOrderStatusUseCase
+    private val processOrderStatusUseCase: ProcessOrderStatusUseCase
 ) {
 
     companion object {
@@ -40,19 +39,10 @@ class RouteVoiceCommandUseCase @Inject constructor(
                     processStockLookupUseCase(transcription)
                 }
 
-                is CommandIntent.CreateOrderItem -> {
-                    Log.d(TAG, "Routing to create order use case")
-                    Log.d(
-                        TAG,
-                        "Order details - Item: '${intent.itemName}', Quantity: ${intent.quantity}"
-                    )
-                    createOrderItemUseCase(intent)
-                }
-
                 is CommandIntent.CheckOrderStatus -> {
-                    Log.d(TAG, "Routing to check order status use case")
+                    Log.d(TAG, "Routing to order status use case")
                     Log.d(TAG, "Order ID: '${intent.orderId}'")
-                    checkOrderStatusUseCase(intent)
+                    processOrderStatusUseCase(transcription)
                 }
 
                 is CommandIntent.Unknown -> {
@@ -124,7 +114,7 @@ class RouteVoiceCommandUseCase @Inject constructor(
             ),
             stockSummaries = emptyMap(),
             stockLookupErrors = mapOf(
-                "intent_not_recognized" to "Command not understood. Try: 'Find stock for [item]', 'Create order for [item] quantity [number]', or 'Check order [ID]'"
+                "intent_not_recognized" to "Command not understood. Try: 'Find stock for [item]', 'Check order [ID]'"
             )
         )
     }

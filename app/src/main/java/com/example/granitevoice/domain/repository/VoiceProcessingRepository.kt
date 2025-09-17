@@ -1,6 +1,7 @@
 package com.example.granitevoice.domain.repository
 
 import com.example.granitevoice.domain.model.MasterItem
+import com.example.granitevoice.domain.model.Order
 
 /**
  * Repository interface for generic voice/natural language processing tasks.
@@ -33,4 +34,16 @@ interface VoiceProcessingRepository {
         query: String,
         candidates: List<MasterItem>
     ): Result<List<MasterItem>>
+
+    /**
+     * Find similar orders using fuzzy matching techniques.
+     * This is a generic language processing task that compares order numbers and customer names
+     * against a list of order candidates using sophisticated algorithms.
+     */
+    suspend fun findSimilarOrders(
+        orderQuery: String,
+        customerQuery: String? = null,
+        candidates: List<Order>,
+        maxResults: Int = 5
+    ): Result<List<Pair<Order, Float>>>
 }

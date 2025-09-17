@@ -236,6 +236,187 @@ class GraniteClient @Inject constructor(
         }
     }
 
+    @Throws(IOException::class)
+    suspend fun getOrders(
+        site: String? = null,
+        filter: String? = null,
+        offset: Int? = null,
+        limit: Int? = null,
+        orderBy: String? = null
+    ): Result<String> {
+        return executeWithRetry {
+            withContext(Dispatchers.IO) {
+                val config = getCurrentConfig()
+                val urlBuilder = StringBuilder("${config.baseUrl}/Documents/ORDER")
+                val params = mutableListOf<String>()
+
+                // Add all parameters as query parameters for GET request
+                site?.let { params.add("Site=$it") }
+                filter?.let { params.add("Filter=$it") }
+                offset?.let { params.add("Offset=$it") }
+                limit?.let { params.add("Limit=$it") }
+                orderBy?.let { params.add("OrderBy=$it") }
+
+                if (params.isNotEmpty()) {
+                    urlBuilder.append("?").append(params.joinToString("&"))
+                }
+
+                val finalUrl = urlBuilder.toString()
+
+                if (config.enableDebugLogging) {
+                    Log.d(TAG, "Orders request URL: $finalUrl")
+                }
+
+                val request = Request.Builder()
+                    .url(finalUrl)
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .get() // Always use GET for QueryDocuments
+                    .build()
+
+                getOrCreateClient().newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> {
+                            response.body?.string() ?: throw IOException("Empty response body")
+                        }
+
+                        response.code == 401 -> {
+                            isAuthenticated = false
+                            throw IOException("Authentication required")
+                        }
+
+                        response.code == 404 -> {
+                            throw IOException("Orders not found")
+                        }
+
+                        else -> {
+                            throw IOException("Orders request failed: ${response.code} - ${response.message}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    suspend fun getOrderProgress(
+        orderNumber: String,
+        site: String? = null
+    ): Result<String> {
+        return executeWithRetry {
+            withContext(Dispatchers.IO) {
+                val config = getCurrentConfig()
+                val urlBuilder = StringBuilder("${config.baseUrl}/DocumentProgress/ORDER")
+                val params = mutableListOf<String>()
+
+                // Add filter for specific order number
+                params.add("Filter=Number[eq]='$orderNumber'")
+                site?.let { params.add("Site=$it") }
+
+                if (params.isNotEmpty()) {
+                    urlBuilder.append("?").append(params.joinToString("&"))
+                }
+
+                val finalUrl = urlBuilder.toString()
+
+                if (config.enableDebugLogging) {
+                    Log.d(TAG, "Order progress request URL: $finalUrl")
+                }
+
+                val request = Request.Builder()
+                    .url(finalUrl)
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .get()
+                    .build()
+
+                getOrCreateClient().newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> {
+                            response.body?.string() ?: throw IOException("Empty response body")
+                        }
+
+                        response.code == 401 -> {
+                            isAuthenticated = false
+                            throw IOException("Authentication required")
+                        }
+
+                        response.code == 404 -> {
+                            throw IOException("Order progress not found for: $orderNumber")
+                        }
+
+                        else -> {
+                            throw IOException("Order progress request failed: ${response.code} - ${response.message}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    suspend fun getDocumentProgress(
+        documentType: String,
+        site: String? = null,
+        filter: String? = null,
+        offset: Int? = null,
+        limit: Int? = null,
+        orderBy: String? = null
+    ): Result<String> {
+        return executeWithRetry {
+            withContext(Dispatchers.IO) {
+                val config = getCurrentConfig()
+                val urlBuilder = StringBuilder("${config.baseUrl}/DocumentProgress/$documentType")
+                val params = mutableListOf<String>()
+
+                // Add all parameters as query parameters
+                site?.let { params.add("Site=$it") }
+                filter?.let { params.add("Filter=$it") }
+                offset?.let { params.add("Offset=$it") }
+                limit?.let { params.add("Limit=$it") }
+                orderBy?.let { params.add("OrderBy=$it") }
+
+                if (params.isNotEmpty()) {
+                    urlBuilder.append("?").append(params.joinToString("&"))
+                }
+
+                val finalUrl = urlBuilder.toString()
+
+                if (config.enableDebugLogging) {
+                    Log.d(TAG, "Document progress request URL: $finalUrl")
+                }
+
+                val request = Request.Builder()
+                    .url(finalUrl)
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .get()
+                    .build()
+
+                getOrCreateClient().newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> {
+                            response.body?.string() ?: throw IOException("Empty response body")
+                        }
+
+                        response.code == 401 -> {
+                            isAuthenticated = false
+                            throw IOException("Authentication required")
+                        }
+
+                        response.code == 404 -> {
+                            throw IOException("Document progress not found")
+                        }
+
+                        else -> {
+                            throw IOException("Document progress request failed: ${response.code} - ${response.message}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private suspend fun executeWithRetry(operation: suspend () -> String): Result<String> {
         val config = getCurrentConfig()
         repeat(config.maxRetries) { attempt ->
