@@ -1,7 +1,6 @@
 package com.example.granitevoice.domain.usecase
 
 import android.util.Log
-import com.example.granitevoice.data.remote.client.OrderFuzzyMatchClient
 import com.example.granitevoice.domain.model.*
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
 import kotlinx.coroutines.withTimeoutOrNull
@@ -13,7 +12,7 @@ import javax.inject.Inject
  * Implements 3-tier matching: Database search → Algorithmic fuzzy → AI fallback
  */
 class ProcessOrderStatusUseCase @Inject constructor(
-    private val orderUseCase: OrderUseCase,
+    private val getOrdersUseCase: GetOrdersUseCase,
     private val voiceProcessingRepository: VoiceProcessingRepository,
     private val config: VoiceProcessingConfig
 ) {
@@ -341,7 +340,7 @@ class ProcessOrderStatusUseCase @Inject constructor(
         val databaseResults = try {
             withTimeoutOrNull(ORDER_LOOKUP_TIMEOUT_MS) {
                 // Try exact match first
-                orderUseCase.getOrderByNumber(orderNumber).fold(
+                getOrdersUseCase.getOrderByNumber(orderNumber).fold(
                     onSuccess = { exactOrder ->
                         if (exactOrder != null) {
                             Log.d(TAG, "✅ Tier 1: Found exact database match")
@@ -349,13 +348,13 @@ class ProcessOrderStatusUseCase @Inject constructor(
                         } else {
                             // Try database fuzzy search
                             Log.d(TAG, "No exact match, trying database fuzzy search")
-                            orderUseCase.searchOrdersByNumber(orderNumber, limit = 10)
+                            getOrdersUseCase.searchOrdersByNumber(orderNumber, limit = 10)
                                 .getOrElse { emptyList() }
                         }
                     },
                     onFailure = {
                         Log.w(TAG, "Database exact search failed, trying database fuzzy search")
-                        orderUseCase.searchOrdersByNumber(orderNumber, limit = 10)
+                        getOrdersUseCase.searchOrdersByNumber(orderNumber, limit = 10)
                             .getOrElse { emptyList() }
                     }
                 )
@@ -379,7 +378,7 @@ class ProcessOrderStatusUseCase @Inject constructor(
 
         val algorithmicResults = try {
             // Get all orders for algorithmic fuzzy matching
-            val allOrders = orderUseCase.getAllOrders(forceSync = false).getOrElse { emptyList() }
+            val allOrders = getOrdersUseCase.getAllOrders(forceSync = false).getOrElse { emptyList() }
 
             if (allOrders.isEmpty()) {
                 Log.w(TAG, "No orders available for algorithmic fuzzy matching")
@@ -617,7 +616,7 @@ class ProcessOrderStatusUseCase @Inject constructor(
 
         try {
             // Use the existing order status check from OrderUseCase
-            orderUseCase.checkOrderStatus(order.number).fold(
+            getOrdersUseCase.checkOrderStatus(order.number).fold(
                 onSuccess = { statusInfo ->
                     orderStatusInfo[order.number] = statusInfo
                     Log.d(TAG, "Order status loaded: ${statusInfo.statusDisplay}")

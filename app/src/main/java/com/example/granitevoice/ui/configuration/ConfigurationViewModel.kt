@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.granitevoice.data.local.preferences.GranitePreferences
 import com.example.granitevoice.data.remote.client.GraniteClient
 import com.example.granitevoice.domain.repository.MasterItemRepository
-import com.example.granitevoice.domain.usecase.OrderUseCase
+import com.example.granitevoice.domain.usecase.GetOrdersUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -34,7 +34,7 @@ class ConfigurationViewModel @Inject constructor(
     private val preferences: GranitePreferences,
     private val graniteClient: GraniteClient,
     private val masterItemRepository: MasterItemRepository,
-    private val orderUseCase: OrderUseCase
+    private val getOrdersUseCase: GetOrdersUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConfigurationUiState())
@@ -183,7 +183,7 @@ class ConfigurationViewModel @Inject constructor(
 
                     try {
                         android.util.Log.d("ConfigurationViewModel", "Starting orders sync...")
-                        orderUseCase.syncOrders()
+                        getOrdersUseCase.syncOrders()
                         ordersSyncSuccess = true
                         android.util.Log.d(
                             "ConfigurationViewModel",

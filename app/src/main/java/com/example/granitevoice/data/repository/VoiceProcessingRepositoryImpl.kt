@@ -1,18 +1,16 @@
 package com.example.granitevoice.data.repository
 
 import android.util.Log
-import com.example.granitevoice.data.remote.client.FastFuzzyMatchClient
 import com.example.granitevoice.data.remote.client.OpenAIClient
-import com.example.granitevoice.data.remote.client.OrderFuzzyMatchClient
 import com.example.granitevoice.domain.model.MasterItem
 import com.example.granitevoice.domain.model.Order
+import com.example.granitevoice.domain.repository.FuzzyMatchingRepository
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
 import javax.inject.Inject
 
 class VoiceProcessingRepositoryImpl @Inject constructor(
     private val openAIClient: OpenAIClient,
-    private val fastFuzzyMatchClient: FastFuzzyMatchClient,
-    private val orderFuzzyMatchClient: OrderFuzzyMatchClient
+    private val fuzzyMatchingRepository: FuzzyMatchingRepository
 ) : VoiceProcessingRepository {
 
     companion object {
@@ -64,13 +62,10 @@ class VoiceProcessingRepositoryImpl @Inject constructor(
                 Log.w(TAG, "❌ No candidates provided for matching")
                 return Result.success(emptyList())
             }
-
-            // First try: Fast AI-based fuzzy matching (much faster than OpenAI)
-            Log.d(TAG, "🚀 Trying fast AI-based fuzzy matching first...")
+            // First try: fuzzy matching via unified repository
+            Log.d(TAG, "🤖 Trying fast fuzzy matching first...")
             val fastMatchStartTime = System.currentTimeMillis()
-
-            val fastMatchResult = fastFuzzyMatchClient.findSimilarItems(query, candidates, 5)
-
+            val fastMatchResult = fuzzyMatchingRepository.findSimilarItems(query, candidates, 5)
             fastMatchResult.fold(
                 onSuccess = { fastMatches ->
                     val fastMatchDuration = System.currentTimeMillis() - fastMatchStartTime
@@ -78,7 +73,6 @@ class VoiceProcessingRepositoryImpl @Inject constructor(
                         TAG,
                         "✅ Fast matching completed in ${fastMatchDuration}ms, found ${fastMatches.size} matches"
                     )
-
                     if (fastMatches.isNotEmpty()) {
                         val totalDuration = System.currentTimeMillis() - startTime
                         Log.d(TAG, "✅ Using fast matching results (total: ${totalDuration}ms)")
@@ -181,10 +175,10 @@ class VoiceProcessingRepositoryImpl @Inject constructor(
                 return Result.success(emptyList())
             }
 
-            // Delegate to the OrderFuzzyMatchClient for sophisticated algorithmic matching
-            Log.d(TAG, "🚀 Using algorithmic order fuzzy matching...")
+            // Delegate to order fuzzy matching via unified repository
+            Log.d(TAG, " Using algorithmic order fuzzy matching...")
 
-            val result = orderFuzzyMatchClient.findSimilarOrders(
+            val result = fuzzyMatchingRepository.findSimilarOrders(
                 orderQuery = orderQuery,
                 customerQuery = customerQuery,
                 candidates = candidates,

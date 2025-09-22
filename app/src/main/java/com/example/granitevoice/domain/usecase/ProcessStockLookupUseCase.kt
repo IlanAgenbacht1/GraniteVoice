@@ -11,7 +11,7 @@ import javax.inject.Inject
  * Use case responsible for processing stock lookup commands
  */
 class ProcessStockLookupUseCase @Inject constructor(
-    private val searchItemsUseCase: SearchItemsUseCase,
+    private val searchLocalItemsUseCase: SearchLocalItemsUseCase,
     private val voiceProcessingRepository: VoiceProcessingRepository,
     private val stockRepository: StockRepository,
     private val config: VoiceProcessingConfig
@@ -66,7 +66,7 @@ class ProcessStockLookupUseCase @Inject constructor(
 
         // Step 3: Search for Items
         val searchStartTime = System.currentTimeMillis()
-        val searchResults = searchItemsUseCase(extractedQuery)
+        val searchResults = searchLocalItemsUseCase(extractedQuery)
         val searchDuration = System.currentTimeMillis() - searchStartTime
 
         processingSteps.add(

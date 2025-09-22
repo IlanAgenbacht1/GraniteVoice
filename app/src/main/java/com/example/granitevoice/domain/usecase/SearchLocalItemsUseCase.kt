@@ -6,7 +6,7 @@ import com.example.granitevoice.domain.repository.MasterItemRepository
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
 import javax.inject.Inject
 
-class SearchItemsUseCase @Inject constructor(
+class SearchLocalItemsUseCase @Inject constructor(
     private val masterItemRepository: MasterItemRepository,
     private val voiceProcessingRepository: VoiceProcessingRepository
 ) {

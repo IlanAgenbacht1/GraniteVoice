@@ -23,12 +23,12 @@ class OrderUseCaseTest {
     @Mock
     private lateinit var orderProgressGraniteSource: OrderProgressGraniteSource
 
-    private lateinit var orderUseCase: OrderUseCase
+    private lateinit var getOrdersUseCase: GetOrdersUseCase
 
     @Before
     fun setUp() {
         MockitoAnnotations.openMocks(this)
-        orderUseCase = OrderUseCase(orderRepository, orderProgressGraniteSource)
+        getOrdersUseCase = GetOrdersUseCase(orderRepository, orderProgressGraniteSource)
     }
 
     @Test
@@ -56,7 +56,7 @@ class OrderUseCaseTest {
             .thenReturn(Result.success(mockOrder))
 
         // When
-        val result = orderUseCase.checkOrderStatus(orderNumber)
+        val result = getOrdersUseCase.checkOrderStatus(orderNumber)
 
         // Then
         assertThat(result.isSuccess).isTrue()
@@ -77,7 +77,7 @@ class OrderUseCaseTest {
             .thenReturn(Result.success(null))
 
         // When
-        val result = orderUseCase.checkOrderStatus(orderNumber)
+        val result = getOrdersUseCase.checkOrderStatus(orderNumber)
 
         // Then
         assertThat(result.isFailure).isTrue()
@@ -99,7 +99,7 @@ class OrderUseCaseTest {
             .thenReturn(Result.success(mockPartners))
 
         // When
-        val result = orderUseCase.getDistinctTradingPartners()
+        val result = getOrdersUseCase.getDistinctTradingPartners()
 
         // Then
         assertThat(result.isSuccess).isTrue()
@@ -113,7 +113,7 @@ class OrderUseCaseTest {
     @Test
     fun `searchOrdersByNumber handles empty search term`() = runTest {
         // When
-        val result = orderUseCase.searchOrdersByNumber("")
+        val result = getOrdersUseCase.searchOrdersByNumber("")
 
         // Then
         assertThat(result.isSuccess).isTrue()

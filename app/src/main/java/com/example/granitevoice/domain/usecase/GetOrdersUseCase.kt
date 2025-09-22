@@ -14,7 +14,7 @@ import javax.inject.Singleton
  * Provides high-level business logic for order management
  */
 @Singleton
-class OrderUseCase @Inject constructor(
+class GetOrdersUseCase @Inject constructor(
     private val orderRepository: OrderRepositoryImpl,
     private val orderProgressGraniteSource: OrderProgressGraniteSource
 ) {

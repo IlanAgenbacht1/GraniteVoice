@@ -9,8 +9,6 @@ import com.example.granitevoice.data.local.db.AppDatabase
 import com.example.granitevoice.data.local.preferences.GranitePreferences
 import com.example.granitevoice.data.remote.client.GraniteClient
 import com.example.granitevoice.data.remote.client.OpenAIClient
-import com.example.granitevoice.data.remote.client.FastFuzzyMatchClient
-import com.example.granitevoice.data.remote.client.OrderFuzzyMatchClient
 import com.example.granitevoice.data.remote.MasterItemsGraniteSource
 import com.example.granitevoice.data.remote.OrdersGraniteSource
 import com.example.granitevoice.data.remote.StockDetailGraniteSource
@@ -19,14 +17,14 @@ import com.example.granitevoice.data.repository.MasterItemRepositoryImpl
 import com.example.granitevoice.data.repository.OrderRepositoryImpl
 import com.example.granitevoice.data.repository.StockRepositoryImpl
 import com.example.granitevoice.data.repository.VoiceProcessingRepositoryImpl
+import com.example.granitevoice.data.repository.FuzzyMatchingRepositoryImpl
 import com.example.granitevoice.domain.model.VoiceProcessingConfig
 import com.example.granitevoice.domain.repository.MasterItemRepository
 import com.example.granitevoice.domain.repository.OrderRepository
 import com.example.granitevoice.domain.repository.StockRepository
 import com.example.granitevoice.domain.repository.VoiceProcessingRepository
-import com.example.granitevoice.domain.repository.AudioTranscriptionRepository
-import com.example.granitevoice.domain.repository.SyncRepository
-import com.example.granitevoice.domain.usecase.OrderUseCase
+import com.example.granitevoice.domain.repository.FuzzyMatchingRepository
+import com.example.granitevoice.domain.usecase.GetOrdersUseCase
 import com.example.granitevoice.domain.usecase.ProcessOrderStatusUseCase
 import com.google.gson.Gson
 import dagger.Module
@@ -88,15 +86,19 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideFuzzyMatchingRepository(): FuzzyMatchingRepository {
+        return FuzzyMatchingRepositoryImpl()
+    }
+
+    @Provides
+    @Singleton
     fun provideVoiceProcessingRepository(
         openAIClient: OpenAIClient,
-        fastFuzzyMatchClient: FastFuzzyMatchClient,
-        orderFuzzyMatchClient: OrderFuzzyMatchClient
+        fuzzyMatchingRepository: FuzzyMatchingRepository
     ): VoiceProcessingRepository {
         return VoiceProcessingRepositoryImpl(
             openAIClient,
-            fastFuzzyMatchClient,
-            orderFuzzyMatchClient
+            fuzzyMatchingRepository
         )
     }
 
@@ -104,7 +106,8 @@ object AppModule {
     @Singleton
     fun provideOrderRepository(
         orderDao: OrderDao,
-        ordersGraniteSource: OrdersGraniteSource
+        ordersGraniteSource: OrdersGraniteSource,
+        fuzzyMatchingRepository: FuzzyMatchingRepository
     ): OrderRepository {
         return OrderRepositoryImpl(orderDao, ordersGraniteSource)
     }
@@ -115,19 +118,19 @@ object AppModule {
     fun provideOrderUseCase(
         orderRepository: OrderRepositoryImpl,
         orderProgressGraniteSource: OrderProgressGraniteSource
-    ): OrderUseCase {
-        return OrderUseCase(orderRepository, orderProgressGraniteSource)
+    ): GetOrdersUseCase {
+        return GetOrdersUseCase(orderRepository, orderProgressGraniteSource)
     }
 
     @Provides
     @Singleton
     fun provideProcessOrderStatusUseCase(
-        orderUseCase: OrderUseCase,
+        getOrdersUseCase: GetOrdersUseCase,
         voiceProcessingRepository: VoiceProcessingRepository,
         config: VoiceProcessingConfig
     ): ProcessOrderStatusUseCase {
         return ProcessOrderStatusUseCase(
-            orderUseCase,
+            getOrdersUseCase,
             voiceProcessingRepository,
             config
         )
@@ -199,18 +202,6 @@ object AppModule {
     @Singleton
     fun provideOpenAIClient(@ApplicationContext context: Context): OpenAIClient {
         return OpenAIClient(context)
-    }
-
-    @Provides
-    @Singleton
-    fun provideFastFuzzyMatchClient(): FastFuzzyMatchClient {
-        return FastFuzzyMatchClient()
-    }
-
-    @Provides
-    @Singleton
-    fun provideOrderFuzzyMatchClient(): OrderFuzzyMatchClient {
-        return OrderFuzzyMatchClient()
     }
 
     @Provides
